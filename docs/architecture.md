@@ -2,19 +2,47 @@
 
 # Architecture
 
-> Skeleton — filled in as the MVP lands. The README carries the user-facing
-> story; this document carries the engineering shape and its invariants.
+The README carries the user-facing story and [usage.md](usage.md) the how-to;
+this document is the engineering shape and its invariants.
 
-## Components
+## Modules (`src/costgate/`)
 
-- **`costgate` CLI (Python, `src/costgate/`)** — all logic lives here. Finds
-  changed models, compiles both versions, dry-runs them, prices the diff,
-  renders reports (terminal markdown, JSON), applies threshold policy via
-  exit code. CI-agnostic: GitHub Actions, GitLab CI, and local runs share
-  this one code path.
-- **GitHub Action wrapper (planned, separate top-level `action.yml`)** — thin
-  composite action: install the CLI, run it, post/update a single sticky PR
-  comment. No logic of its own.
+A **pure core** plus two side-effecting edges. Everything except `bigquery.py`
+(network) and `gitdiff.py` (a git subprocess) is pure Python over dataclasses,
+so the pipeline is unit-tested end to end without a warehouse or credentials.
+
+| Module | Responsibility | Edge? |
+|---|---|---|
+| `cli.py` | argparse `check`, wire the pipeline, own the exit codes | — |
+| `config.py` | load `.costgate.yml`, merge CLI overrides (CLI wins) | — |
+| `artifacts.py` | load manifest, filter to cost-bearing models, resolve compiled SQL, checksum-diff, basis + warning heuristics | — |
+| `gitdiff.py` | local selection via `git diff` (git only, no dbt) | git |
+| `pricing.py` + `data/pricing.json` | region → $/TiB with disclosed source | — |
+| `bigquery.py` | `DryRunner` protocol + `BigQueryDryRunner` (ADC, retry) | network |
+| `estimate.py` | drive dry-runs, categorize errors, build priced deltas | — |
+| `policy.py` | threshold evaluation → verdict + exit code | — |
+| `report.py` | render terminal / markdown / JSON | — |
+| `models.py` | shared dataclasses and enums | — |
+
+The **GitHub Action wrapper** (separate `action.yml`, next PR) is a thin
+composite: install the CLI, run it, post/update one sticky PR comment. No logic.
+
+## Data flow
+
+```
+compiled artifacts ──┐
+  --baseline (main)   ├─→ select changed (─select > checksum-diff > git-diff)
+  --current (target)  │         │  filter: resource_type=model, language=sql,
+                      │         │          non-ephemeral
+                      │         ▼
+                      │   resolve compiled SQL (compiled_path file, else compiled_code)
+                      │         │
+                      │         ▼
+                      │   BigQuery dry-run (dryRun=true) — free, per model, retried
+                      │         │  categorize failures (destination_missing … operational)
+                      │         ▼
+                      └─→ region-aware pricing ─→ report (md/term/json) ─→ gate (exit code)
+```
 
 ## Data flow (MVP)
 
@@ -58,8 +86,8 @@ is a documented proxy, not an invoice prediction.
 - **Dry-run needs compilable SQL** with real target credentials — the gate
   runs where dbt already runs, using the auth dbt already has.
 
-## Open questions (tracked in decision records)
+## Roadmap notes
 
-- Baseline acquisition UX for local runs (artifact download helper vs. BYO
-  manifest path).
-- $/month modeling: per-model run-frequency config format.
+- One-command local diff (`--against <ref>`) via an isolated git worktree.
+- Per-region custom pricing overrides in config.
+- Production actuals from `INFORMATION_SCHEMA.JOBS`.

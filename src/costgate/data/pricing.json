@@ -1,0 +1,12 @@
+{
+  "version": "2026.07",
+  "last_verified": "2026-07-23",
+  "source": "https://cloud.google.com/bigquery/pricing",
+  "currency": "USD",
+  "note": "On-demand analysis price per TiB scanned. Only rates verified against the official page are listed; every unlisted region falls back to default_usd_per_tib and says so in the report. Add a verified region with a one-line PR (see CONTRIBUTING.md).",
+  "default_usd_per_tib": 6.25,
+  "regions": {
+    "US": 6.25,
+    "EU": 6.25
+  }
+}
