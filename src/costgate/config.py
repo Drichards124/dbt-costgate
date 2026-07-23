@@ -31,6 +31,7 @@ class Thresholds:
 class Config:
     region: str | None = None
     usd_per_tib: float | None = None
+    pricing_regions: dict[str, float] = field(default_factory=dict)
     thresholds: Thresholds = field(default_factory=Thresholds)
     run_frequency_default: int | None = None
     run_frequency_models: dict[str, int] = field(default_factory=dict)
@@ -66,6 +67,7 @@ class Config:
         return cls(
             region=pricing.get("region"),
             usd_per_tib=_opt_float(pricing.get("usd_per_tib")),
+            pricing_regions=_region_rates(pricing.get("regions")),
             thresholds=Thresholds(
                 max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
                 max_pct_increase=_opt_float(thr.get("max_pct_increase")),
@@ -81,6 +83,18 @@ class Config:
 
     def runs_per_month(self, model_name: str) -> int | None:
         return self.run_frequency_models.get(model_name, self.run_frequency_default)
+
+
+def _region_rates(raw) -> dict[str, float]:
+    """Parse a `pricing.regions` map. A rate may be 0 (flat-rate slots), but a
+    negative rate is nonsense and would silently subtract cost."""
+    rates: dict[str, float] = {}
+    for region, value in (raw or {}).items():
+        rate = float(value)
+        if rate < 0:
+            raise ValueError(f"pricing.regions[{region!r}]: rate must be >= 0, got {rate}")
+        rates[region] = rate
+    return rates
 
 
 def _opt_float(v) -> float | None:

@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selection: `--select`, else baseline checksum-diff, else `git diff`.
   - Region-aware pricing that discloses the region, rate, and source in every
     report; overridable via config or `--usd-per-tib`/`--region`.
+  - Per-region pricing map: set `pricing.regions` in `.costgate.yml` to patch or
+    extend the built-in rate table one region at a time (region keys match
+    case-insensitively; `0.00` is allowed for flat-rate slots). Reports tag each
+    region's source when a run spans regions of differing provenance, and the
+    `json` output gains a `pricing.region_sources` map. Rate precedence, most
+    specific first: `--usd-per-tib` → `pricing.regions` → `pricing.usd_per_tib` →
+    built-in table → disclosed default.
   - Incremental models estimated via their full-refresh form and labeled as such.
   - Output formats: `terminal`, `markdown`, `json` (`--format`, `--output`).
   - Thresholds and behavior via `.costgate.yml` or flags; `--fail-on`.

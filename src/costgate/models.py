@@ -167,6 +167,7 @@ class PricingDisclosure:
     source: str  # e.g. "built-in table v2026.07" / "user override" / "default fallback"
     table_version: str
     last_verified: str
+    region_sources: dict[str, str] = field(default_factory=dict)  # region -> rate source
 
 
 @dataclass
