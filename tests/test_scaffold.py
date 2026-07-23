@@ -1,10 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Scaffold smoke tests: the package imports and the CLI stub answers."""
 
-import pytest
-
 from costgate import __version__
-from costgate.cli import main
+from costgate.cli import build_parser, main
 
 
 def test_version_is_three_part_semver():
@@ -17,7 +15,7 @@ def test_bare_invocation_prints_help_and_succeeds(capsys):
     assert "cost gate" in capsys.readouterr().out
 
 
-def test_check_is_declared_but_not_implemented():
-    with pytest.raises(SystemExit) as excinfo:
-        main(["check"])
-    assert excinfo.value.code == 2
+def test_check_subcommand_is_declared():
+    parser = build_parser()
+    args = parser.parse_args(["check"])
+    assert args.command == "check"

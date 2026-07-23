@@ -20,7 +20,10 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Environment :: Console",
 ]
-dependencies = []
+dependencies = [
+    "google-cloud-bigquery>=3.0",
+    "PyYAML>=6.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Drichards124/costgate"
