@@ -86,8 +86,8 @@ is a documented proxy, not an invoice prediction.
 - **Dry-run needs compilable SQL** with real target credentials — the gate
   runs where dbt already runs, using the auth dbt already has.
 
-## Open questions (tracked in decision records)
+## Roadmap notes
 
-- Baseline acquisition UX for local runs (artifact download helper vs. BYO
-  manifest path).
-- $/month modeling: per-model run-frequency config format.
+- One-command local diff (`--against <ref>`) via an isolated git worktree.
+- Per-region custom pricing overrides in config.
+- Production actuals from `INFORMATION_SCHEMA.JOBS`.
