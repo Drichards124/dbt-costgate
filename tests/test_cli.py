@@ -108,6 +108,25 @@ def test_uncompiled_baseline_rejected(tmp_path: Path, capsys):
     assert "no compiled SQL" in capsys.readouterr().err
 
 
+def test_config_command_lists_keys(capsys):
+    code = main(["config"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "pricing.regions" in out
+    assert "run_frequency.models" in out
+
+
+def test_config_command_json_has_native_defaults(capsys):
+    code = main(["config", "--format", "json"])
+    out = capsys.readouterr().out
+    assert code == 0
+    by_key = {e["key"]: e for e in json.loads(out)}
+    assert by_key["fail_on"]["default"] == "fail"  # native string, not stringified
+    assert by_key["exclude"]["default"] == []  # native list
+    assert by_key["pricing.region"]["default"] is None  # native null
+    assert set(by_key["fail_on"]) == {"key", "type", "default", "help"}  # attr not leaked
+
+
 def test_json_output_to_file(tmp_path: Path):
     target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
     out_file = tmp_path / "report.json"

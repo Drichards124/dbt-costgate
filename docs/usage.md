@@ -140,6 +140,9 @@ fail_on: fail                   # never | warn | fail
 CLI flags (`--region`, `--usd-per-tib`, `--max-usd-per-run`, `--fail-on`, …)
 override the file.
 
+For the full, always-current list of keys — type, default, and what each does —
+run `costgate config` (add `--format json` for a machine-readable version).
+
 **Rate precedence** (most specific first): CLI `--usd-per-tib` → config
 `pricing.regions[region]` → config `pricing.usd_per_tib` → built-in table →
 disclosed default. A region not named in `pricing.regions` still falls through to
