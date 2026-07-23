@@ -25,10 +25,11 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 
 </div>
 
-> [!IMPORTANT]
-> **Pre-MVP.** This repository currently contains the project definition and scaffold.
-> Output shown below is an illustrative mock of the target design — follow the
-> [roadmap](#roadmap) or the [changelog](CHANGELOG.md) for progress.
+> [!NOTE]
+> **Working MVP.** `costgate check` is implemented and tested. The PR-comment
+> image below is still an illustrative mock (the GitHub Action wrapper is the next
+> step); the terminal output further down is **real** costgate output. See the
+> [usage guide](docs/usage.md) and [changelog](CHANGELOG.md).
 
 ---
 
@@ -57,24 +58,28 @@ gate:
 
 </div>
 
-<details>
-<summary><b>💻 The same check, locally — before you even open the PR</b></summary>
+<details open>
+<summary><b>💻 The same check, in your terminal (real output)</b></summary>
 <br/>
 
 ```text
-$ costgate check --baseline .costgate/prod-manifest.json
-costgate — region: US (multi-region) · on-demand $6.25/TiB · source: built-in table 2026.07
+$ costgate check --baseline path/to/main/manifest.json
 
-  model                     baseline      this branch       Δ per run    est. Δ per month
-  ─────────────────────────────────────────────────────────────────────────────────────
-  fct_orders_daily          68.2 MiB   →  2.91 TiB          +$18.16      +$544.80  (30 runs)
-  dim_customers  (new)      —          →  412.5 MiB         +$0.003      +$0.08    (30 runs)
-  stg_payments              1.10 GiB   →  1.10 GiB           $0.00       —
+costgate — region: US · on-demand $6.25/TiB · built-in table
 
-  GATE: FAIL — fct_orders_daily exceeds max increase per run ($5.00)
+  fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +$18.19/run   +$545.61/month (30 runs)
+      ⚠ incremental — figure is the full-refresh scan
+  dim_customers  (new): — → 412.50 MiB   +$0.00/run   +$0.07/month (30 runs)
+
+  GATE: FAIL
+    - fct_orders_daily: +$18.19/run exceeds $5.00
+
+  Pricing: US $6.25/TiB · built-in table (table 2026.07, verified 2026-07-23)
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 
-*(Illustrative output — format may change before the first release.)*
+Or run it with no baseline at all for an instant local read of what your changed
+models scan — see the [usage guide](docs/usage.md).
 
 </details>
 
@@ -133,11 +138,13 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 
 ## Roadmap
 
-- [ ] **MVP** — `costgate check` (local + CI), region-aware pricing, threshold policy
+- [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
+- [ ] **One-command local diff** — `costgate check --against main` (isolated git worktree)
 - [ ] **GitHub Action** wrapper with a sticky PR comment
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API
+- [ ] **Production actuals** — real per-run scan bytes from `INFORMATION_SCHEMA.JOBS`
 
 ## Non-goals
 
