@@ -42,18 +42,14 @@ def test_config_region_map_wins_and_discloses_override():
 
 
 def test_cli_flat_override_beats_region_map():
-    table = PricingTable.load(
-        cli_override_usd_per_tib=9.0, override_regions={"EU": 3.0}
-    )
+    table = PricingTable.load(cli_override_usd_per_tib=9.0, override_regions={"EU": 3.0})
     rate = table.rate_for("EU")
     assert rate.usd_per_tib == 9.0
     assert rate.source == "user-override"
 
 
 def test_region_map_beats_config_global_and_falls_through_for_others():
-    table = PricingTable.load(
-        override_regions={"EU": 3.0}, override_usd_per_tib=7.0
-    )
+    table = PricingTable.load(override_regions={"EU": 3.0}, override_usd_per_tib=7.0)
     assert table.rate_for("EU").usd_per_tib == 3.0  # map wins for its region
     other = table.rate_for("US")  # not in map -> config global flat
     assert other.usd_per_tib == 7.0
