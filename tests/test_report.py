@@ -91,6 +91,58 @@ def test_absolute_mode_renders_scanned_not_delta():
     assert "GATE: PASS" in out
 
 
+def _mixed_report():
+    # one delta so render_terminal emits the disclosure footer (empty reports
+    # short-circuit before it)
+    deltas = [
+        CostDelta(
+            name="m",
+            unique_id="model.pkg.m",
+            is_incremental=False,
+            is_new=True,
+            gateable=True,
+            bytes_baseline=None,
+            bytes_current=1_000_000_000,
+            usd_baseline=None,
+            usd_current=0.006,
+            region="europe-west3",
+            runs_per_month=30,
+        )
+    ]
+    disclosure = PricingDisclosure(
+        regions={"europe-west3": 4.80, "US": 6.25},
+        source="built-in table + user override",
+        table_version="2026.07",
+        last_verified="2026-07-23",
+        region_sources={"europe-west3": "user-override", "US": "region-table"},
+    )
+    return Report(
+        deltas=deltas, disclosure=disclosure, verdict=Verdict(Status.PASS), mode="absolute"
+    )
+
+
+def test_json_exposes_region_sources():
+    payload = json.loads(report.render_json(_mixed_report()))
+    assert payload["pricing"]["region_sources"] == {
+        "europe-west3": "user-override",
+        "US": "region-table",
+    }
+    assert payload["pricing"]["source"] == "built-in table + user override"
+
+
+def test_terminal_annotates_per_region_source_when_mixed():
+    out = report.render_terminal(_mixed_report())
+    assert "europe-west3 $4.80/TiB (override)" in out
+    assert "US $6.25/TiB (table)" in out
+
+
+def test_terminal_stays_clean_when_single_source():
+    # the default fixture is single-source; no per-region markers should appear
+    out = report.render_terminal(_report(mode="absolute", status=Status.PASS))
+    assert "(override)" not in out
+    assert "(table)" not in out
+
+
 @pytest.mark.parametrize("fmt", ["terminal", "markdown", "json"])
 def test_empty_report_is_graceful(fmt):
     disclosure = PricingDisclosure(

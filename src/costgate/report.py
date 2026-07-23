@@ -36,8 +36,25 @@ def _usd(v: float | None, *, signed: bool = False) -> str:
     return f"${v:,.2f}"
 
 
+_SOURCE_MARKERS = {
+    "user-override": "override",
+    "region-table": "table",
+    "default-fallback": "fallback",
+}
+
+
 def _disclosure_line(d: PricingDisclosure) -> str:
-    regions = " · ".join(f"{r} ${rate:,.2f}/TiB" for r, rate in d.regions.items()) or "—"
+    # When a report mixes provenance across regions, tag each region so the
+    # aggregate label ("built-in table + user override") is not ambiguous.
+    mixed = len(set(d.region_sources.values())) > 1
+    parts = []
+    for r, rate in d.regions.items():
+        token = f"{r} ${rate:,.2f}/TiB"
+        marker = _SOURCE_MARKERS.get(d.region_sources.get(r, "")) if mixed else None
+        if marker:
+            token += f" ({marker})"
+        parts.append(token)
+    regions = " · ".join(parts) or "—"
     return f"Pricing: {regions} · {d.source} (table {d.table_version}, verified {d.last_verified})"
 
 
@@ -196,6 +213,7 @@ def render_json(report: Report) -> str:
         },
         "pricing": {
             "regions": d0.regions,
+            "region_sources": d0.region_sources,
             "source": d0.source,
             "table_version": d0.table_version,
             "last_verified": d0.last_verified,

@@ -71,8 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
     if args.region is not None:
         config.region = args.region
-    if args.usd_per_tib is not None:
-        config.usd_per_tib = args.usd_per_tib
+    # NB: --usd-per-tib is *not* merged into config here. It is a CLI-level flat
+    # override that must outrank the config file's pricing.regions map, so it is
+    # threaded to PricingTable separately (see run_check). config.usd_per_tib
+    # therefore stays the file-level global override.
     if args.format is not None:
         config.report_format = args.format
     if args.fail_on is not None:
@@ -86,26 +88,34 @@ def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
     return config
 
 
+_SOURCE_LABELS = {
+    "user-override": "user override",
+    "region-table": "built-in table",
+    "default-fallback": "default fallback",
+}
+
+
+def _aggregate_source(sources: set[str]) -> str:
+    """Name every provenance present, so a mixed report says so honestly."""
+    present = [_SOURCE_LABELS[s] for s in _SOURCE_LABELS if s in sources]
+    return " + ".join(present) or "built-in table"
+
+
 def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
     regions: dict[str, float] = {}
-    sources = set()
+    region_sources: dict[str, str] = {}
     seen = deltas or []
     region_names = {d.region for d in seen} or {table.override_region or "US"}
     for name in sorted(region_names):
         rate = table.rate_for(name)
         regions[rate.region] = rate.usd_per_tib
-        sources.add(rate.source)
-    if "user-override" in sources:
-        source = "user override"
-    elif "default-fallback" in sources:
-        source = "built-in table + default fallback"
-    else:
-        source = "built-in table"
+        region_sources[rate.region] = rate.source
     return PricingDisclosure(
         regions=regions,
-        source=source,
+        source=_aggregate_source(set(region_sources.values())),
         table_version=table.version,
         last_verified=table.last_verified,
+        region_sources=region_sources,
     )
 
 
@@ -178,7 +188,10 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         return policy.EXIT_OPERATIONAL
 
     table = PricingTable.load(
-        override_usd_per_tib=config.usd_per_tib, override_region=config.region
+        cli_override_usd_per_tib=args.usd_per_tib,
+        override_regions=config.pricing_regions,
+        override_usd_per_tib=config.usd_per_tib,
+        override_region=config.region,
     )
     deltas = estimate.build_deltas(estimates, table, config)
     verdict = policy.evaluate(deltas, config)
