@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "costgate"
+dynamic = ["version"]
+description = "BigQuery cost gate for dbt pull requests: dry-run changed models, diff the bytes, price the damage before it merges."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Dashan Richards" }]
+keywords = ["bigquery", "dbt", "finops", "cost", "dry-run", "ci", "analytics-engineering"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+    "Environment :: Console",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Drichards124/costgate"
+Repository = "https://github.com/Drichards124/costgate"
+Issues = "https://github.com/Drichards124/costgate/issues"
+Changelog = "https://github.com/Drichards124/costgate/blob/main/CHANGELOG.md"
+
+[project.scripts]
+costgate = "costgate.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.6"]
+
+[tool.hatch.version]
+path = "src/costgate/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/costgate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

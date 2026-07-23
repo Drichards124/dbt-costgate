@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Runtime dependencies are deliberately minimal (see SECURITY.md — this tool
+  # runs next to warehouse credentials). Updates target `ple` so they pass the
+  # production-like gate before reaching `main`, like any change.
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "ple"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "ple"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]

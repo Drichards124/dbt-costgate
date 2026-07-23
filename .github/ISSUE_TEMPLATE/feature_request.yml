@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose an improvement to the gate, the report, or the pricing model.
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What cost-visibility problem are you hitting that costgate doesn't solve today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like costgate to do? If it affects reported dollars, say how the figure should be derived.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today, or other tools that partially cover this.
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        Note the project's hard invariants (see CONTRIBUTING.md): dry-run only,
+        no credential handling, no telemetry. Proposals that require breaking
+        one of these will be redirected to a design discussion.

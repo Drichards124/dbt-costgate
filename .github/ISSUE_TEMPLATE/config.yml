@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Drichards124/costgate/security/advisories/new
+    about: Report security issues privately via GitHub's private vulnerability reporting — not as a public issue.
+  - name: Question or discussion
+    url: https://github.com/Drichards124/costgate/discussions
+    about: Ask usage questions or discuss ideas before filing a feature request.

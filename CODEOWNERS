@@ -1,0 +1,12 @@
+# Code owners for costgate.
+# These owners are requested for review on every pull request, and are
+# required reviewers on protected branches.
+
+# Default owner for everything in the repo.
+*       @Drichards124
+
+# The pricing table defines every dollar figure the tool reports — guard it.
+/src/costgate/data/   @Drichards124
+
+# Release and CI configuration.
+/.github/    @Drichards124
