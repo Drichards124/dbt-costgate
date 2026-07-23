@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
+import pytest
+
 from costgate.config import Config
 
 
@@ -45,3 +47,31 @@ fail_on: warn
     assert cfg.warn_only == ["sessions"]
     assert cfg.report_format == "markdown"
     assert cfg.fail_on == "warn"
+
+
+def test_pricing_regions_parses_to_floats(tmp_path: Path):
+    (tmp_path / ".costgate.yml").write_text(
+        """
+pricing:
+  regions:
+    europe-west3: 4.80
+    US: 6
+    asia-northeast1: 0.0
+""",
+        "utf-8",
+    )
+    cfg = Config.load(None, tmp_path)
+    assert cfg.pricing_regions == {"europe-west3": 4.80, "US": 6.0, "asia-northeast1": 0.0}
+
+
+def test_pricing_regions_rejects_negative_rate(tmp_path: Path):
+    (tmp_path / ".costgate.yml").write_text(
+        """
+pricing:
+  regions:
+    europe-west3: -1.0
+""",
+        "utf-8",
+    )
+    with pytest.raises(ValueError, match="europe-west3"):
+        Config.load(None, tmp_path)

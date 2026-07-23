@@ -107,14 +107,19 @@ fake it; it flags it.
   worst-case") and lets you `exclude`/`warn_only` heavily-partitioned models.
 - **Region-aware pricing.** The applied region, rate, and its source appear in
   every report. Unlisted regions fall back to a disclosed default; override a
-  negotiated/editions rate with `pricing.usd_per_tib`.
+  negotiated/editions rate flatly with `pricing.usd_per_tib`, or per region with
+  `pricing.regions` (see below). When a report spans regions with different
+  sources, each region is tagged (`override` / `table` / `fallback`).
 
 ## Configuration (`.costgate.yml`)
 
 ```yaml
 pricing:
   region: europe-west3          # force a region (default: auto-detect)
-  usd_per_tib: 5.00             # negotiated / editions override
+  usd_per_tib: 5.00             # flat negotiated / editions override (all regions)
+  regions:                      # per-region rates (patch/extend the built-in table)
+    europe-west3: 4.80          #   region keys match case-insensitively
+    US: 6.00                    #   0.00 is valid (e.g. flat-rate slots); negative is rejected
 thresholds:
   max_usd_increase_per_run: 5.00
   max_pct_increase: 25
@@ -134,6 +139,11 @@ fail_on: fail                   # never | warn | fail
 
 CLI flags (`--region`, `--usd-per-tib`, `--max-usd-per-run`, `--fail-on`, …)
 override the file.
+
+**Rate precedence** (most specific first): CLI `--usd-per-tib` → config
+`pricing.regions[region]` → config `pricing.usd_per_tib` → built-in table →
+disclosed default. A region not named in `pricing.regions` still falls through to
+the flat override, then the table.
 
 ## Least-privilege IAM
 
