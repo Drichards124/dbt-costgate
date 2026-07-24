@@ -88,6 +88,16 @@ is a documented proxy, not an invoice prediction.
 
 ## Roadmap notes
 
-- One-command local diff (`--against <ref>`) via an isolated git worktree.
 - Per-region custom pricing overrides in config.
 - Production actuals from `INFORMATION_SCHEMA.JOBS`.
+- Absolute cost ceilings (max `$/run`, max `TiB/run`) — gate the *total* scan, not
+  just the before/after delta. Unlike the three increase thresholds, an absolute
+  ceiling needs no baseline, so it would also gate the zero-setup local
+  (`absolute`) mode. Caveat: for incremental models the reported `$/run` is the
+  full-refresh scan, so an absolute cap gates rebuild cost — pair with the existing
+  full-refresh labeling.
+
+Shipped: one-command local diff (`--against <ref>`) — checks the ref out into an
+isolated git worktree, `dbt compile`s it as the baseline, and removes the worktree
+after. The one edge that needs both git and dbt, so it lives outside the pure core
+and outside git-only `gitdiff.py` (see [[0006-consume-compiled-artifacts]]).
