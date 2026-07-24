@@ -24,8 +24,8 @@ so the pipeline is unit-tested end to end without a warehouse or credentials.
 | `report.py` | render terminal / markdown / JSON | — |
 | `models.py` | shared dataclasses and enums | — |
 
-The **GitHub Action wrapper** (separate `action.yml`, next PR) is a thin
-composite: install the CLI, run it, post/update one sticky PR comment. No logic.
+The **GitHub Action wrapper** (separate `action.yml`) is a thin composite:
+install the CLI, run it, post/update one sticky PR comment. No logic.
 
 ## Data flow
 
@@ -90,14 +90,15 @@ is a documented proxy, not an invoice prediction.
 
 - Per-region custom pricing overrides in config.
 - Production actuals from `INFORMATION_SCHEMA.JOBS`.
-- Absolute cost ceilings (max `$/run`, max `TiB/run`) — gate the *total* scan, not
-  just the before/after delta. Unlike the three increase thresholds, an absolute
-  ceiling needs no baseline, so it would also gate the zero-setup local
-  (`absolute`) mode. Caveat: for incremental models the reported `$/run` is the
-  full-refresh scan, so an absolute cap gates rebuild cost — pair with the existing
-  full-refresh labeling.
+
+Shipped: absolute cost ceilings (`max_usd_total` / `--max-usd-total`,
+`max_tib_total` / `--max-tib-total`) — gate a model's *total* per-run scan, not
+just the before/after delta. Unlike the three increase thresholds, an absolute
+ceiling needs no baseline, so it also gates the zero-setup local (`absolute`) mode.
+Caveat: for incremental models the reported `$/run` is the full-refresh scan, so an
+absolute cap gates rebuild cost — paired with the existing full-refresh labeling.
 
 Shipped: one-command local diff (`--against <ref>`) — checks the ref out into an
 isolated git worktree, `dbt compile`s it as the baseline, and removes the worktree
 after. The one edge that needs both git and dbt, so it lives outside the pure core
-and outside git-only `gitdiff.py` (see [[0006-consume-compiled-artifacts]]).
+and outside git-only `gitdiff.py`.

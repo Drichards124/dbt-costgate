@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline, so they gate the zero-setup local run and also catch an
   already-expensive model that a before/after diff would pass because it barely
   changed. For incrementals the figure is the full-refresh scan.
+- **GitHub Action** now exposes `max-usd-total`, `max-tib-total`, and
+  `project-dir` inputs (the latter catching the Action up to the `--project-dir`
+  flag), forwarding each to `costgate check`.
 
 ## [0.4.0] - 2026-07-24
 
