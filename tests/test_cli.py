@@ -71,6 +71,63 @@ def test_diff_mode_gate_fails_when_over_threshold(tmp_path: Path, capsys):
     assert "GATE: FAIL" in out
 
 
+def _write_baseline(tmp_path: Path, *specs) -> Path:
+    baseline = tmp_path / "base.json"
+    baseline.write_text(json.dumps(make_manifest(*specs)), "utf-8")
+    return baseline
+
+
+def test_rename_map_produces_a_diff_across_a_model_rename(tmp_path: Path, capsys):
+    target = _target(
+        tmp_path, make_node("fct_orders_daily", compiled_code="CUR_daily", checksum="n")
+    )
+    baseline = _write_baseline(
+        tmp_path, make_node("fct_orders_monthly", compiled_code="BASE_monthly", checksum="o")
+    )
+    (tmp_path / ".costgate.yml").write_text(
+        "renames:\n  fct_orders_daily: fct_orders_monthly\n", "utf-8"
+    )
+    runner = FakeDryRunner({"CUR_daily": 3 * TIB, "BASE_monthly": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--baseline",
+            str(baseline),
+            "--config",
+            str(tmp_path / ".costgate.yml"),
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "fct_orders_daily" in out
+    assert "renamed baseline" in out and "fct_orders_monthly" in out
+
+
+def test_misconfigured_rename_exits_operational(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("fct_orders_daily", compiled_code="CUR_daily"))
+    baseline = _write_baseline(tmp_path, make_node("fct_orders_monthly", compiled_code="BASE_m"))
+    (tmp_path / ".costgate.yml").write_text("renames:\n  fct_orders_daily: ghost_model\n", "utf-8")
+    runner = FakeDryRunner({"CUR_daily": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--baseline",
+            str(baseline),
+            "--config",
+            str(tmp_path / ".costgate.yml"),
+        ],
+        runner=runner,
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "ghost_model" in err
+
+
 def test_diff_mode_passes_under_threshold(tmp_path: Path):
     target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="new"))
     baseline = tmp_path / "base.json"

@@ -44,6 +44,7 @@ class Config:
     run_frequency_models: dict[str, int] = field(default_factory=dict)
     exclude: list[str] = field(default_factory=list)
     warn_only: list[str] = field(default_factory=list)
+    renames: dict[str, str] = field(default_factory=dict)
     report_format: str = "terminal"
     fail_on: str = "fail"  # never | warn | fail
 
@@ -86,6 +87,7 @@ class Config:
             run_frequency_models={k: int(v) for k, v in (freq.get("models") or {}).items()},
             exclude=list(raw.get("exclude") or []),
             warn_only=list(raw.get("warn_only") or []),
+            renames={str(k): str(v) for k, v in (raw.get("renames") or {}).items()},
             report_format=report.get("format", "terminal"),
             fail_on=raw.get("fail_on", "fail"),
         )
@@ -220,6 +222,15 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "list[str]",
         [],
         "Model names shown as a warning instead of gated.",
+    ),
+    ConfigField(
+        "renames",
+        "renames",
+        "map[str->str]",
+        {},
+        "Pair a renamed model to its baseline for a diff (current -> baseline), for "
+        "when a model rename changes its unique_id and auto-matching can't. Each side "
+        "is a model name or a full unique_id. Requires a baseline (diff mode).",
     ),
     ConfigField(
         "report.format",

@@ -77,6 +77,28 @@ def test_basis_mismatch_disables_gating():
     assert not ests[0].gateable
 
 
+def test_rename_map_diffs_against_differently_named_baseline():
+    current = _nodes(make_node("fct_orders_daily", compiled_code="CUR_daily", checksum="new"))
+    baseline = _nodes(make_node("fct_orders_monthly", compiled_code="BASE_monthly", checksum="old"))
+    renames = {"model.pkg.fct_orders_daily": "model.pkg.fct_orders_monthly"}
+    runner = FakeDryRunner({"CUR_daily": 3 * TIB, "BASE_monthly": 1 * TIB})
+    ests = estimate.estimate_models(
+        ["model.pkg.fct_orders_daily"],
+        current,
+        baseline,
+        runner,
+        current_dir=None,
+        diff_mode=True,
+        renames=renames,
+    )
+    e = ests[0]
+    assert not e.is_new
+    assert e.bytes_baseline == TIB and e.bytes_current == 3 * TIB
+    assert any("renamed baseline" in w and "fct_orders_monthly" in w for w in e.warnings)
+    deltas = estimate.build_deltas(ests, PricingTable.load(), Config())
+    assert round(deltas[0].usd_per_run_delta, 2) == round(2 * 6.25, 2)
+
+
 def test_build_deltas_applies_exclude():
     current = _nodes(make_node("events", compiled_code="CUR_events"))
     runner = FakeDryRunner({"CUR_events": TIB})
