@@ -23,6 +23,8 @@ pricing:
 thresholds:
   max_usd_increase_per_run: 5.0
   max_pct_increase: 25
+  max_usd_total: 40.0
+  max_tib_total: 6.5
 run_frequency:
   default: 30
   models:
@@ -41,6 +43,8 @@ fail_on: warn
     assert cfg.region == "europe-west3"
     assert cfg.usd_per_tib == 5.0
     assert cfg.thresholds.max_usd_increase_per_run == 5.0
+    assert cfg.thresholds.max_usd_total == 40.0
+    assert cfg.thresholds.max_tib_total == 6.5
     assert cfg.thresholds.any_set
     assert cfg.runs_per_month("fct_orders_daily") == 60
     assert cfg.runs_per_month("other") == 30
@@ -123,6 +127,8 @@ thresholds:
   max_usd_increase_per_run: 5.0
   max_pct_increase: 25
   max_usd_increase_per_month: 100.0
+  max_usd_total: 40.0
+  max_tib_total: 6.5
 run_frequency:
   default: 30
   models:

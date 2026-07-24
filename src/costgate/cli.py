@@ -82,6 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--max-usd-per-month", type=float, help="Fail if $/month increase exceeds this."
     )
+    check.add_argument(
+        "--max-usd-total",
+        type=float,
+        help="Fail if a model's total $/run exceeds this (absolute cap, no baseline needed).",
+    )
+    check.add_argument(
+        "--max-tib-total",
+        type=float,
+        help="Fail if a model's total TiB/run exceeds this (absolute cap, no baseline needed).",
+    )
 
     cfg = sub.add_parser(
         "config",
@@ -114,6 +124,11 @@ def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.thresholds.max_pct_increase = args.max_pct
     if args.max_usd_per_month is not None:
         config.thresholds.max_usd_increase_per_month = args.max_usd_per_month
+    # Explicit `is not None`: a 0 cap (zero-tolerance) must survive 0.0's falsiness.
+    if args.max_usd_total is not None:
+        config.thresholds.max_usd_total = args.max_usd_total
+    if args.max_tib_total is not None:
+        config.thresholds.max_tib_total = args.max_tib_total
     return config
 
 
