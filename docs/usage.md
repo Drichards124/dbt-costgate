@@ -82,6 +82,33 @@ the built table, not the current main branch's compiled SQL).
   their incremental form; costgate flags that as a basis mismatch rather than
   mis-diffing.
 
+### Local before/after in one command (`--against <ref>`)
+
+Locally, skip the manual baseline entirely. Compile your branch once, then let
+costgate produce the baseline for you:
+
+```bash
+dbt compile                       # your branch (the "current" side)
+costgate check --against main     # costgate compiles `main` for the baseline
+```
+
+`--against <ref>` checks `<ref>` out into a throwaway git worktree, runs
+`dbt compile` there, diffs it against your compiled branch, and removes the
+worktree when done — no stashing, no leaving your branch, no `--baseline` path to
+manage. `--against` and `--baseline` are mutually exclusive.
+
+Notes:
+
+- It assumes your dbt project is at the git repo root and `dbt` is importable from
+  your environment (it resolves your venv's `dbt` even when only a shell alias is
+  on `PATH`).
+- Your installed `dbt_packages/` are reused (symlinked into the worktree), so there
+  is no `dbt deps` step — meaning the baseline compiles against *your branch's*
+  package versions, close enough for a cost baseline.
+- This is a local convenience. In CI, prefer the stashed-baseline approach above:
+  it's faster (no second compile) and doesn't depend on the base ref being
+  buildable from the PR runner.
+
 ## GitHub Action
 
 Wrap `costgate check` in a pull-request gate with one step. The Action installs
@@ -167,9 +194,9 @@ fake it; it flags it.
 ## Accuracy notes
 
 - **Change detection catches SQL-body changes, not config- or macro-only ones.**
-  Both the `git diff` local default and the `--baseline` checksum diff select a
-  model when its SQL body changes or it's newly added — mirroring the common core
-  of dbt's `state:modified`. A change that touches *only* a model's config (e.g.
+  Both the `git diff` local default and the checksum diff (`--baseline` /
+  `--against`) select a model when its SQL body changes or it's newly added —
+  mirroring the common core of dbt's `state:modified`. A change that touches *only* a model's config (e.g.
   `materialized`, `partition_by`) or *only* an upstream macro won't be picked up
   automatically. Price those explicitly with `--select`, or pipe
   `dbt ls --select state:modified` for dbt-authoritative selection.

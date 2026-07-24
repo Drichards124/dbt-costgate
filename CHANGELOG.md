@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`costgate check --against <ref>`** — get a before/after cost diff locally in
+  one command, with no manual baseline. costgate checks `<ref>` out into a
+  throwaway git worktree, runs `dbt compile` there, uses it as the baseline, and
+  removes the worktree when done. Compile your own branch once; `--against` handles
+  the other side.
+  - Mutually exclusive with `--baseline`.
+  - Reuses your installed `dbt_packages/` (no `dbt deps` step); assumes the dbt
+    project is at the git repo root and resolves `dbt` from your active
+    environment.
+  - On any failure (unknown ref, `dbt` not found, compile error) it exits `2` with
+    an actionable message and always cleans up the worktree.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
