@@ -102,6 +102,13 @@ fake it; it flags it.
 
 ## Accuracy notes
 
+- **Change detection catches SQL-body changes, not config- or macro-only ones.**
+  Both the `git diff` local default and the `--baseline` checksum diff select a
+  model when its SQL body changes or it's newly added — mirroring the common core
+  of dbt's `state:modified`. A change that touches *only* a model's config (e.g.
+  `materialized`, `partition_by`) or *only* an upstream macro won't be picked up
+  automatically. Price those explicitly with `--select`, or pipe
+  `dbt ls --select state:modified` for dbt-authoritative selection.
 - **Dynamic filters** (`CURRENT_DATE()`, subquery predicates) make BigQuery
   dry-runs report a full-table scan. costgate flags these ("dry-run may be
   worst-case") and lets you `exclude`/`warn_only` heavily-partitioned models.
