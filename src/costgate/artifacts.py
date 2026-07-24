@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from costgate.models import EstimateBasis, ModelNode
@@ -74,6 +75,8 @@ def model_nodes(manifest: dict) -> dict[str, ModelNode]:
             compiled_path=node.get("compiled_path"),
             compiled_code=node.get("compiled_code"),
             original_file_path=node.get("original_file_path"),
+            patch_path=node.get("patch_path"),
+            depends_on_macros=list((node.get("depends_on") or {}).get("macros") or []),
         )
     return out
 
@@ -132,14 +135,23 @@ def resolve_renames(
     return resolved
 
 
+def _compiled_differs(base: ModelNode, node: ModelNode) -> bool:
+    """Whether the two versions compile to different SQL. A missing side is
+    *unknown*, not different — a parse-only manifest must never select everything."""
+    if base.compiled_code is None or node.compiled_code is None:
+        return False
+    return base.compiled_code != node.compiled_code
+
+
 def select_changed(
     baseline: dict[str, ModelNode],
     current: dict[str, ModelNode],
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    """Added or body-modified models (checksum differs). Mirrors the common core
-    of dbt's state:modified; config-only/macro-only changes are a documented gap.
-    A declared rename (``current_uid`` in ``renames``) is always selected."""
+    """Models that were added, whose body changed (checksum differs), or whose
+    compiled SQL differs — the last catching config-only and macro-only changes,
+    which never touch the model's own file. A declared rename (``current_uid`` in
+    ``renames``) is always selected."""
     renames = renames or {}
     changed = []
     for uid, node in current.items():
@@ -151,7 +163,94 @@ def select_changed(
             changed.append(uid)
         elif node.checksum is None or base.checksum is None or node.checksum != base.checksum:
             changed.append(uid)
+        elif _compiled_differs(base, node):
+            changed.append(uid)
     return changed
+
+
+def indirect_changes(baseline: dict[str, ModelNode], current: dict[str, ModelNode]) -> set[str]:
+    """The models ``select_changed`` picks up *only* from their compiled SQL. Their
+    own file is untouched, so the cause is upstream — surfaced as a warning so a
+    model never appears in a report without an explanation."""
+    out: set[str] = set()
+    for uid, node in current.items():
+        base = baseline.get(uid)
+        if base is None or node.checksum is None or base.checksum is None:
+            continue
+        if node.checksum == base.checksum and _compiled_differs(base, node):
+            out.add(uid)
+    return out
+
+
+@dataclass(frozen=True)
+class MacroIndex:
+    """The macro graph as the manifest records it: the file each macro is defined
+    in, and the macros each macro calls."""
+
+    files: dict[str, str]  # macro unique_id -> original_file_path
+    depends_on: dict[str, list[str]]  # macro unique_id -> macro unique_ids it calls
+
+
+def macro_index(manifest: dict) -> MacroIndex:
+    files: dict[str, str] = {}
+    depends_on: dict[str, list[str]] = {}
+    for uid, macro in (manifest.get("macros") or {}).items():
+        path = macro.get("original_file_path")
+        if path:
+            files[uid] = path
+        depends_on[uid] = list((macro.get("depends_on") or {}).get("macros") or [])
+    return MacroIndex(files=files, depends_on=depends_on)
+
+
+def _changed_macros(paths: set[str], index: MacroIndex) -> set[str]:
+    """Macros defined in a changed file, plus every macro that calls one — dbt
+    treats the caller of a changed macro as changed too, and so must we."""
+    callers: dict[str, set[str]] = {}
+    for uid, deps in index.depends_on.items():
+        for dep in deps:
+            callers.setdefault(dep, set()).add(uid)
+    stack = [uid for uid, path in index.files.items() if path in paths]
+    seen: set[str] = set()
+    while stack:
+        uid = stack.pop()
+        if uid in seen:
+            continue
+        seen.add(uid)
+        stack.extend(callers.get(uid, ()))
+    return seen
+
+
+def _patch_file(patch_path: str) -> str:
+    """``patch_path`` is ``<package>://<path>``; the path half is project-relative,
+    the same basis as ``original_file_path``."""
+    return patch_path.split("://", 1)[-1]
+
+
+def select_by_paths(
+    nodes: dict[str, ModelNode],
+    paths: list[str],
+    macros: MacroIndex | None = None,
+) -> list[str]:
+    """Models a set of changed project-relative paths touches: the model's own file,
+    the YAML that patches it, or any macro in its macro closure. Needs no baseline
+    manifest, so it drives the zero-setup local run."""
+    changed = set(paths)
+    changed_macros = _changed_macros(changed, macros) if macros else set()
+    selected = []
+    for uid, node in nodes.items():
+        if node.original_file_path and node.original_file_path in changed:
+            selected.append(uid)
+        elif node.patch_path and _patch_file(node.patch_path) in changed:
+            selected.append(uid)
+        elif changed_macros.intersection(node.depends_on_macros):
+            selected.append(uid)
+    return selected
+
+
+def touches_project_config(paths: list[str]) -> bool:
+    """A ``dbt_project.yml`` change is project-wide config — real, but not
+    attributable to individual models from paths alone."""
+    return any(p == "dbt_project.yml" or p.endswith("/dbt_project.yml") for p in paths)
 
 
 def detect_basis(node: ModelNode, sql: str | None) -> EstimateBasis:

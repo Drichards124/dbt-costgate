@@ -26,12 +26,14 @@ def estimate_models(
     diff_mode: bool,
     threads: int = 8,
     renames: dict[str, str] | None = None,
+    indirect: set[str] | None = None,
 ) -> list[ModelEstimate]:
     renames = renames or {}
+    indirect = indirect or set()
 
     def work(uid: str) -> ModelEstimate:
         return _estimate_one(
-            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames
+            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames, indirect
         )
 
     if threads <= 1 or len(selected) <= 1:
@@ -51,6 +53,7 @@ def _estimate_one(
     current_dir: Path | None,
     diff_mode: bool,
     renames: dict[str, str],
+    indirect: set[str],
 ) -> ModelEstimate:
     node = current_nodes[uid]
     base = baseline_nodes.get(uid)
@@ -66,6 +69,10 @@ def _estimate_one(
     est.warnings = artifacts.sql_warnings(node, current_sql)
     if renamed_base is not None:
         est.warnings.append(f"compared against renamed baseline `{renamed_base.name}`")
+    if uid in indirect:
+        est.warnings.append(
+            "compiled SQL changed but the model file didn't — an upstream macro or a config change"
+        )
 
     if not current_sql:
         est.error_kind = None

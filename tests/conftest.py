@@ -5,6 +5,7 @@ the whole pipeline is exercised without a warehouse or credentials."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,8 @@ def make_node(
     relation_name: str | None = None,
     original_file_path: str | None = None,
     compiled_path: str | None = None,
+    patch_path: str | None = None,
+    depends_on_macros: list[str] | None = None,
     database: str = "proj",
     schema: str = "analytics",
     package: str = "pkg",
@@ -41,14 +44,47 @@ def make_node(
         else f"select * from {name}_src",
         "compiled_path": compiled_path,
         "original_file_path": original_file_path or f"models/{name}.sql",
+        "patch_path": patch_path,
+        "depends_on": {"macros": list(depends_on_macros or [])},
         "checksum": {"checksum": checksum if checksum is not None else f"sum-{name}"},
         "config": {"materialized": materialized},
     }
     return unique_id, node
 
 
-def make_manifest(*nodes: tuple[str, dict]) -> dict:
-    return {"nodes": {uid: node for uid, node in nodes}}
+def make_macro(
+    name: str,
+    *,
+    original_file_path: str | None = None,
+    depends_on_macros: list[str] | None = None,
+    package: str = "pkg",
+) -> tuple[str, dict]:
+    unique_id = f"macro.{package}.{name}"
+    macro = {
+        "name": name,
+        "resource_type": "macro",
+        "original_file_path": original_file_path or f"macros/{name}.sql",
+        "macro_sql": f"{{% macro {name}() %}}{{% endmacro %}}",
+        "depends_on": {"macros": list(depends_on_macros or [])},
+    }
+    return unique_id, macro
+
+
+def make_manifest(*nodes: tuple[str, dict], macros: tuple[tuple[str, dict], ...] = ()) -> dict:
+    return {
+        "nodes": {uid: node for uid, node in nodes},
+        "macros": {uid: macro for uid, macro in macros},
+    }
+
+
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def init_repo(repo: Path) -> None:
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "t")
 
 
 def write_target(tmp_path: Path, manifest: dict, compiled: dict[str, str] | None = None) -> Path:

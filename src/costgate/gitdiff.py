@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Lightweight local model selection via `git diff`.
+"""Lightweight local change detection via `git diff`.
 
 The one git-touching edge (no dbt here). Used only for the zero-setup local
-default: figure out which models the working branch changed. Degrades cleanly —
-a shallow clone, a missing ref, or a non-git directory returns a reason, never a
-stack trace.
+default: report which files the working branch changed, leaving the mapping from
+paths to models to `artifacts`. Degrades cleanly — a shallow clone, a missing
+ref, or a non-git directory returns a reason, never a stack trace.
 """
 
 from __future__ import annotations
@@ -12,8 +12,6 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
-from costgate.models import ModelNode
 
 
 class GitDiffError(Exception):
@@ -70,15 +68,3 @@ def changed_paths(project_dir: Path, base: str | None = None) -> list[str]:
         merge_base = ref
     out = git.run("diff", "--name-only", merge_base)
     return [line.strip() for line in out.splitlines() if line.strip()]
-
-
-def select_by_git(
-    nodes: dict[str, ModelNode], project_dir: Path, base: str | None = None
-) -> list[str]:
-    """Map changed .sql files to model unique_ids via original_file_path."""
-    paths = set(changed_paths(project_dir, base))
-    return [
-        uid
-        for uid, node in nodes.items()
-        if node.original_file_path and node.original_file_path in paths
-    ]
