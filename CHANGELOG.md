@@ -31,4 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Thresholds and behavior via `.costgate.yml` or flags; `--fail-on`.
   - Exit codes: `0` pass, `1` gate failed, `2` costgate couldn't run.
   - Credentials are never handled — Application Default Credentials only.
+- `costgate config` — list every `.costgate.yml` key with its type, default, and a
+  plain-English explanation; `--format json` for a machine-readable reference.
 - Documentation: `docs/usage.md`.
