@@ -249,8 +249,9 @@ def select_by_paths(
 
 def touches_project_config(paths: list[str]) -> bool:
     """A ``dbt_project.yml`` change is project-wide config — real, but not
-    attributable to individual models from paths alone."""
-    return any(p == "dbt_project.yml" or p.endswith("/dbt_project.yml") for p in paths)
+    attributable to individual models from paths alone. Paths are project-relative,
+    so only this project's file matches, never a sibling project's."""
+    return any(p == "dbt_project.yml" for p in paths)
 
 
 def detect_basis(node: ModelNode, sql: str | None) -> EstimateBasis:

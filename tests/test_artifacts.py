@@ -236,7 +236,8 @@ def test_select_by_paths_ignores_an_unrelated_macro():
     )
 
 
-def test_touches_project_config_spots_dbt_project_yml_anywhere():
+def test_touches_project_config_spots_only_this_projects_dbt_project_yml():
+    # Paths are project-relative, so a sibling project's config is not ours to warn about.
     assert artifacts.touches_project_config(["dbt_project.yml"])
-    assert artifacts.touches_project_config(["analytics/dbt_project.yml"])
+    assert not artifacts.touches_project_config(["other_project/dbt_project.yml"])
     assert not artifacts.touches_project_config(["models/dbt_project_notes.md"])

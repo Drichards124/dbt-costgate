@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A changed `dbt_project.yml` is reported on stderr rather than guessed at —
   project-wide config can't be traced to individual models from a diff.
 
+### Fixed
+
+- **Local change detection now works when the dbt project is in a repo
+  subdirectory** (monorepos). `git diff` reports paths from the repository root
+  while a dbt manifest records them relative to the project, so nothing matched and
+  `costgate check` reported zero models and exited 0 — indistinguishable from
+  "nothing changed". Changes in sibling directories are no longer considered
+  either. Projects at the repository root are unaffected.
+
 ### Changed
 
 - A config change that doesn't alter a model's compiled SQL (`partition_by`,
