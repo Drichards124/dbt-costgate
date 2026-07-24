@@ -90,6 +90,12 @@ is a documented proxy, not an invoice prediction.
 
 - Per-region custom pricing overrides in config.
 - Production actuals from `INFORMATION_SCHEMA.JOBS`.
+- Absolute cost ceilings (max `$/run`, max `TiB/run`) — gate the *total* scan, not
+  just the before/after delta. Unlike the three increase thresholds, an absolute
+  ceiling needs no baseline, so it would also gate the zero-setup local
+  (`absolute`) mode. Caveat: for incremental models the reported `$/run` is the
+  full-refresh scan, so an absolute cap gates rebuild cost — pair with the existing
+  full-refresh labeling.
 
 Shipped: one-command local diff (`--against <ref>`) — checks the ref out into an
 isolated git worktree, `dbt compile`s it as the baseline, and removes the worktree

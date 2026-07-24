@@ -143,6 +143,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [x] **One-command local diff** — `costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
+- [ ] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API
