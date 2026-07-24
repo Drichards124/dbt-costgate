@@ -62,6 +62,8 @@ class ModelNode:
     compiled_path: str | None
     compiled_code: str | None
     original_file_path: str | None = None
+    patch_path: str | None = None
+    depends_on_macros: list[str] = field(default_factory=list)
     location: str | None = None
 
     @property

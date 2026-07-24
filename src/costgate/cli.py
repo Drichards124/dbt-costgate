@@ -35,8 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
             "an isolated worktree), reports the before/after diff and can gate on "
             "thresholds. Without one (local default), reports each changed model's "
             "current scan cost. Selection: --select wins, else the baseline diff, "
-            "else `git diff` vs main. Detects added and body-modified models; "
-            "config-only and macro-only changes are not yet detected."
+            "else `git diff` vs main. Detects added and body-modified models, plus "
+            "config-only and macro-only changes that alter a model's compiled SQL."
         ),
     )
     check.add_argument(
@@ -171,13 +171,22 @@ def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
     )
 
 
-def _select(args, current_nodes, baseline_nodes, project_dir, renames=None) -> list[str]:
+def _select(
+    args, current_nodes, baseline_nodes, project_dir, renames=None, macros=None
+) -> list[str]:
     if args.select:
         wanted = {s.strip() for s in args.select.split(",") if s.strip()}
         return [uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted]
     if baseline_nodes is not None:
         return artifacts.select_changed(baseline_nodes, current_nodes, renames)
-    return gitdiff.select_by_git(current_nodes, project_dir, args.base)
+    paths = gitdiff.changed_paths(project_dir, args.base)
+    if artifacts.touches_project_config(paths):
+        print(
+            "costgate: dbt_project.yml changed — project-wide config can't be traced "
+            "to individual models; price the affected ones with --select.",
+            file=sys.stderr,
+        )
+    return artifacts.select_by_paths(current_nodes, paths, macros)
 
 
 class _UsageError(Exception):
@@ -243,6 +252,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         print(f"costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
     current_nodes = artifacts.model_nodes(current_manifest)
+    macros = artifacts.macro_index(current_manifest)
 
     baseline_nodes = None
     if eff_baseline:
@@ -287,10 +297,16 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             return policy.EXIT_OPERATIONAL
 
     try:
-        selected = _select(args, current_nodes, baseline_nodes, project_dir, renames)
+        selected = _select(args, current_nodes, baseline_nodes, project_dir, renames, macros)
     except GitDiffError as exc:
         print(f"costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
+
+    # Models the diff picked up from their compiled SQL alone; each carries a
+    # warning saying so, since the change is upstream of the model's own file.
+    indirect: set[str] = set()
+    if baseline_nodes is not None and not args.select:
+        indirect = artifacts.indirect_changes(baseline_nodes, current_nodes)
 
     diff_mode = baseline_nodes is not None
     if runner is None:
@@ -305,6 +321,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         diff_mode=diff_mode,
         threads=args.threads,
         renames=renames,
+        indirect=indirect,
     )
 
     if selected and estimate.has_only_operational_failures(estimates):

@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Config- and macro-only change detection.** `costgate check` now selects a model
+  when a change it doesn't own reaches it, instead of silently skipping it:
+  - With a baseline (`--baseline` / `--against`), when the model's **compiled SQL**
+    differs even though its own `.sql` file is unchanged — what an upstream macro
+    edit or a config change actually does. These models are labelled in the report
+    ("compiled SQL changed but the model file didn't"), so a model never shows up
+    without a reason.
+  - In the local `git diff` default (no baseline), when the change touches a
+    **macro** anywhere in the model's macro closure, or the **YAML file that
+    patches it** (its `schema.yml`).
+
+  A changed `dbt_project.yml` is reported on stderr rather than guessed at —
+  project-wide config can't be traced to individual models from a diff.
+
+### Changed
+
+- A config change that doesn't alter a model's compiled SQL (`partition_by`,
+  `cluster_by`) is still not selected: it doesn't change that model's own scan
+  either. `docs/usage.md` now states this precisely instead of describing all
+  config changes as undetected.
+
 ## [0.5.0] - 2026-07-24
 
 ### Added
