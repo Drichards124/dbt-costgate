@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--project-dir <dir>`** on `costgate check` — point costgate at the directory
+  containing your `dbt_project.yml` when it can't be inferred from `--current`
+  (for example a custom `target-path` or a copied manifest).
+
+### Changed
+
+- **`--against <ref>`** now works when your dbt project lives in a repo
+  subdirectory, not just at the git repo root. costgate detects the repo root and
+  compiles the project in its actual location.
+
 ## [0.3.0] - 2026-07-24
 
 ### Added

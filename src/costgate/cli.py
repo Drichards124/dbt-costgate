@@ -45,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the compiled dbt target/ dir or manifest.json (default: ./target).",
     )
     check.add_argument(
+        "--project-dir",
+        help=(
+            "Directory containing dbt_project.yml. Overrides the location inferred "
+            "from --current; use when your compiled target isn't at <project>/target."
+        ),
+    )
+    check.add_argument(
         "--baseline",
         help="Path to the baseline (main, compiled the same way) manifest.json for a diff.",
     )
@@ -154,6 +161,15 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     current_arg = Path(args.current)
     target_dir = current_arg if current_arg.is_dir() else current_arg.parent
     project_dir = target_dir.parent if target_dir.name else Path.cwd()
+
+    # --project-dir decouples "where the dbt project / git repo is" from where the
+    # compiled --current manifest sits; validate up front so config discovery,
+    # --against, and git selection all get a real directory.
+    if args.project_dir:
+        project_dir = Path(args.project_dir).resolve()
+        if not project_dir.is_dir():
+            print(f"costgate: --project-dir does not exist: {args.project_dir}", file=sys.stderr)
+            return policy.EXIT_OPERATIONAL
 
     config = Config.load(Path(args.config) if args.config else None, project_dir)
     config = _apply_overrides(config, args)
