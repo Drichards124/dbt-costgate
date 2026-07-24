@@ -122,9 +122,7 @@ def test_against_preflight_requires_compiled_current(tmp_path: Path, capsys):
     uid, node = make_node("m")
     node["compiled_code"] = None  # parse-only current target
     target = write_target(tmp_path, make_manifest((uid, node)))
-    code = main(
-        ["check", "--current", str(target), "--against", "main"], runner=FakeDryRunner({})
-    )
+    code = main(["check", "--current", str(target), "--against", "main"], runner=FakeDryRunner({}))
     assert code == 2
     assert "dbt compile" in capsys.readouterr().err
 

@@ -105,9 +105,7 @@ def compiled_baseline(
     # the finally-block below genuinely can't cover.
     _git(project_dir, "worktree", "prune", check=False)
 
-    verify = _git(
-        project_dir, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False
-    )
+    verify = _git(project_dir, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
     if verify.returncode != 0:
         raise AgainstError(
             f"couldn't resolve ref {ref!r} to compile as the baseline. Use an "
