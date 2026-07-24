@@ -63,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     check.add_argument(
+        "--baseline-target",
+        help=(
+            "Name of a baseline defined under `baselines:` in .costgate.yml "
+            "(each is a manifest path or a git ref). Mutually exclusive with "
+            "--baseline/--against; defaults to the config's default_baseline."
+        ),
+    )
+    check.add_argument(
         "--select",
         help="Comma-separated model names to estimate (overrides change detection).",
     )
@@ -172,6 +180,38 @@ def _select(args, current_nodes, baseline_nodes, project_dir, renames=None) -> l
     return gitdiff.select_by_git(current_nodes, project_dir, args.base)
 
 
+class _UsageError(Exception):
+    """A CLI/config misuse that should exit 2 with a clean message, not a traceback."""
+
+
+def _resolve_baseline(args: argparse.Namespace, config: Config) -> tuple[str | None, str | None]:
+    """Resolve the effective baseline source to (manifest_path, against_ref) — at most
+    one set. Precedence: explicit --baseline/--against > --baseline-target > config
+    default_baseline > none (local mode). Raises _UsageError on misuse."""
+    explicit = [f for f in (args.baseline, args.against, args.baseline_target) if f]
+    if len(explicit) > 1:
+        raise _UsageError("use only one of --baseline, --against, or --baseline-target.")
+    if args.baseline:
+        return args.baseline, None
+    if args.against:
+        return None, args.against
+    name = args.baseline_target or config.default_baseline
+    if not name:
+        return None, None
+    target = config.baselines.get(name)
+    if target is None:
+        known = ", ".join(sorted(config.baselines)) or "none"
+        raise _UsageError(
+            f"baseline target {name!r} is not defined under `baselines:` in "
+            f".costgate.yml (defined: {known})."
+        )
+    if bool(target.manifest) == bool(target.against):
+        raise _UsageError(
+            f"baseline target {name!r} needs exactly one of `manifest:` or `against:`."
+        )
+    return target.manifest, target.against
+
+
 def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     current_arg = Path(args.current)
     target_dir = current_arg if current_arg.is_dir() else current_arg.parent
@@ -189,11 +229,12 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     config = Config.load(Path(args.config) if args.config else None, project_dir)
     config = _apply_overrides(config, args)
 
-    if args.against and args.baseline:
-        print(
-            "costgate: use either --against <ref> or --baseline <manifest>, not both.",
-            file=sys.stderr,
-        )
+    # Resolve the baseline source: an explicit --baseline/--against, else a named
+    # --baseline-target / config default_baseline (each a manifest path or a git ref).
+    try:
+        eff_baseline, eff_against = _resolve_baseline(args, config)
+    except _UsageError as exc:
+        print(f"costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
 
     try:
@@ -204,14 +245,14 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     current_nodes = artifacts.model_nodes(current_manifest)
 
     baseline_nodes = None
-    if args.baseline:
+    if eff_baseline:
         try:
-            baseline_manifest = artifacts.load_manifest(Path(args.baseline))
+            baseline_manifest = artifacts.load_manifest(Path(eff_baseline))
         except ArtifactError as exc:
             print(f"costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
         baseline_nodes = artifacts.model_nodes(baseline_manifest)
-    elif args.against:
+    elif eff_against:
         # Pre-flight before the 5–30s worktree+compile: bail if the current side
         # can't be dry-run anyway.
         if not artifacts.has_any_compiled_code(current_nodes):
@@ -222,7 +263,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             )
             return policy.EXIT_OPERATIONAL
         try:
-            baseline_nodes = against.compiled_baseline(args.against, project_dir)
+            baseline_nodes = against.compiled_baseline(eff_against, project_dir)
         except AgainstError as exc:
             print(f"costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL

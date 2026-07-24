@@ -179,7 +179,7 @@ def test_against_and_baseline_mutually_exclusive(tmp_path: Path, capsys):
         runner=FakeDryRunner({}),
     )
     assert code == 2
-    assert "not both" in capsys.readouterr().err
+    assert "only one" in capsys.readouterr().err
 
 
 def test_against_preflight_requires_compiled_current(tmp_path: Path, capsys):

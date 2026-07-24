@@ -35,6 +35,16 @@ class Thresholds:
 
 
 @dataclass
+class BaselineTarget:
+    """A named baseline source: exactly one of a prebuilt ``manifest`` path or a git
+    ``against`` ref to compile. The one-of rule is validated where the target is
+    selected (cli), so an unused malformed entry never aborts an unrelated run."""
+
+    manifest: str | None = None
+    against: str | None = None
+
+
+@dataclass
 class Config:
     region: str | None = None
     usd_per_tib: float | None = None
@@ -45,6 +55,8 @@ class Config:
     exclude: list[str] = field(default_factory=list)
     warn_only: list[str] = field(default_factory=list)
     renames: dict[str, str] = field(default_factory=dict)
+    baselines: dict[str, BaselineTarget] = field(default_factory=dict)
+    default_baseline: str | None = None
     report_format: str = "terminal"
     fail_on: str = "fail"  # never | warn | fail
 
@@ -88,6 +100,8 @@ class Config:
             exclude=list(raw.get("exclude") or []),
             warn_only=list(raw.get("warn_only") or []),
             renames={str(k): str(v) for k, v in (raw.get("renames") or {}).items()},
+            baselines=_baseline_targets(raw.get("baselines")),
+            default_baseline=raw.get("default_baseline"),
             report_format=report.get("format", "terminal"),
             fail_on=raw.get("fail_on", "fail"),
         )
@@ -106,6 +120,16 @@ def _region_rates(raw) -> dict[str, float]:
             raise ValueError(f"pricing.regions[{region!r}]: rate must be >= 0, got {rate}")
         rates[region] = rate
     return rates
+
+
+def _baseline_targets(raw) -> dict[str, BaselineTarget]:
+    """Parse a `baselines:` map (name -> {manifest|against}). Non-dict entries
+    become empty targets; the cli reports the one-of violation when selected."""
+    out: dict[str, BaselineTarget] = {}
+    for name, spec in (raw or {}).items():
+        spec = spec if isinstance(spec, dict) else {}
+        out[str(name)] = BaselineTarget(manifest=spec.get("manifest"), against=spec.get("against"))
+    return out
 
 
 def _opt_float(v) -> float | None:
@@ -231,6 +255,23 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Pair a renamed model to its baseline for a diff (current -> baseline), for "
         "when a model rename changes its unique_id and auto-matching can't. Each side "
         "is a model name or a full unique_id. Requires a baseline (diff mode).",
+    ),
+    ConfigField(
+        "baselines",
+        "baselines",
+        "map[str->{manifest|against}]",
+        {},
+        "Named baseline sources (dbt --target analogy). Each name maps to either a "
+        "`manifest:` path or an `against:` git ref. Select one with --baseline-target "
+        "<name>; a `manifest` target travels to CI, an `against` target needs git+dbt.",
+    ),
+    ConfigField(
+        "default_baseline",
+        "default_baseline",
+        "str",
+        None,
+        "Name of the `baselines:` entry to use when no --baseline/--against/"
+        "--baseline-target is given, so `costgate check` diffs without a flag.",
     ),
     ConfigField(
         "report.format",

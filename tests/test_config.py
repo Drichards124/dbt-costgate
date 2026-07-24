@@ -35,6 +35,12 @@ warn_only:
   - sessions
 renames:
   fct_orders_daily: fct_orders_monthly
+baselines:
+  main:
+    against: main
+  ple:
+    manifest: artifacts/ple/manifest.json
+default_baseline: main
 report:
   format: markdown
 fail_on: warn
@@ -49,6 +55,9 @@ fail_on: warn
     assert cfg.thresholds.max_tib_total == 6.5
     assert cfg.thresholds.any_set
     assert cfg.renames == {"fct_orders_daily": "fct_orders_monthly"}
+    assert cfg.baselines["main"].against == "main"
+    assert cfg.baselines["ple"].manifest == "artifacts/ple/manifest.json"
+    assert cfg.default_baseline == "main"
     assert cfg.runs_per_month("fct_orders_daily") == 60
     assert cfg.runs_per_month("other") == 30
     assert cfg.exclude == ["events"]
@@ -142,6 +151,10 @@ warn_only:
   - sessions
 renames:
   fct_orders_daily: fct_orders_monthly
+baselines:
+  main:
+    against: main
+default_baseline: main
 report:
   format: markdown
 fail_on: warn
