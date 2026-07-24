@@ -128,6 +128,33 @@ Notes:
   it's faster (no second compile) and doesn't depend on the base ref being
   buildable from the PR runner.
 
+### Renamed a model?
+
+costgate pairs baseline↔current models by dbt identity (`unique_id`), which is
+tied to the model's `.sql` name. A **physical** table rename (a dbt `alias`,
+`schema`, or `database` that differs dev↔prod) does **not** change the identity, so
+the baseline is matched automatically — nothing to do. But renaming the **model
+itself** (e.g. `fct_orders_monthly` → `fct_orders_daily`) changes its `unique_id`,
+and auto-matching can no longer pair the two — the current model would be reported
+as *new*, losing the before/after.
+
+For that case, declare the pairing (`current: baseline`) so costgate diffs them —
+useful for seeing how, say, a granularity change affects scan cost:
+
+```yaml
+# .costgate.yml
+renames:
+  fct_orders_daily: fct_orders_monthly
+```
+
+- Each side is a **model name** or a full **`unique_id`** (use the `unique_id` if a
+  bare name is ambiguous across packages).
+- Requires a baseline (`--baseline`/`--against`); renames are a diff-mode concept.
+- An unresolvable, ambiguous, or many-to-one entry **fails the run** (exit 2) with
+  an actionable message — it never silently mis-diffs.
+- `--select` targets **current** model names: a renamed model is selected by its
+  new name, then diffed via the map.
+
 ## GitHub Action
 
 Wrap `costgate check` in a pull-request gate with one step. The Action installs
@@ -251,6 +278,8 @@ exclude:                        # reported, never gated
   - events_partitioned
 warn_only:                      # shown as a warning, not gated
   - sessions_rolling
+renames:                        # pair a renamed model to its baseline (current: baseline)
+  fct_orders_daily: fct_orders_monthly
 report:
   format: terminal              # terminal | markdown | json
 fail_on: fail                   # never | warn | fail

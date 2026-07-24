@@ -26,8 +26,9 @@ def make_node(
     compiled_path: str | None = None,
     database: str = "proj",
     schema: str = "analytics",
+    package: str = "pkg",
 ) -> tuple[str, dict]:
-    unique_id = f"{resource_type}.pkg.{name}"
+    unique_id = f"{resource_type}.{package}.{name}"
     node = {
         "name": name,
         "resource_type": resource_type,

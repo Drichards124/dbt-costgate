@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GitHub Action** now exposes `max-usd-total`, `max-tib-total`, and
   `project-dir` inputs (the latter catching the Action up to the `--project-dir`
   flag), forwarding each to `costgate check`.
+- **`renames`** config key (`.costgate.yml`) — pair a renamed model to its
+  baseline (`current: baseline`, by model name or `unique_id`) so costgate diffs
+  across a model rename instead of reporting the model as new. Requires a
+  baseline; a bad mapping fails the run with an actionable error.
 
 ## [0.4.0] - 2026-07-24
 

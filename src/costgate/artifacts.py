@@ -92,11 +92,60 @@ def resolve_compiled_sql(node: ModelNode, project_dir: Path | None) -> str | Non
     return node.compiled_code
 
 
-def select_changed(baseline: dict[str, ModelNode], current: dict[str, ModelNode]) -> list[str]:
+def _resolve_ref(ref: str, nodes: dict[str, ModelNode], side: str) -> str:
+    """Resolve a user-supplied model reference to a unique_id. Accepts a full
+    unique_id (used verbatim) or a bare model name (looked up by ``.name``)."""
+    if ref in nodes:
+        return ref
+    matches = [uid for uid, n in nodes.items() if n.name == ref]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ArtifactError(
+            f"renames: {side} model {ref!r} not found. Use its dbt model name or its "
+            f"full unique_id (e.g. model.<package>.<name>)."
+        )
+    raise ArtifactError(
+        f"renames: {side} model name {ref!r} is ambiguous across packages "
+        f"({', '.join(sorted(matches))}). Disambiguate with the full unique_id."
+    )
+
+
+def resolve_renames(
+    renames: dict[str, str],
+    current: dict[str, ModelNode],
+    baseline: dict[str, ModelNode],
+) -> dict[str, str]:
+    """Turn a user ``renames`` map (current -> baseline, by name or unique_id) into
+    a ``current_uid -> baseline_uid`` map against the loaded manifests. Fails loudly
+    on an unresolvable, ambiguous, or many-to-one mapping rather than mis-diffing."""
+    resolved: dict[str, str] = {}
+    for current_ref, baseline_ref in renames.items():
+        cur_uid = _resolve_ref(current_ref, current, "current")
+        base_uid = _resolve_ref(baseline_ref, baseline, "baseline")
+        resolved[cur_uid] = base_uid
+    if len(set(resolved.values())) < len(resolved):
+        raise ArtifactError(
+            "renames: two or more current models map to the same baseline model; "
+            "each baseline may be paired with only one current model."
+        )
+    return resolved
+
+
+def select_changed(
+    baseline: dict[str, ModelNode],
+    current: dict[str, ModelNode],
+    renames: dict[str, str] | None = None,
+) -> list[str]:
     """Added or body-modified models (checksum differs). Mirrors the common core
-    of dbt's state:modified; config-only/macro-only changes are a documented gap."""
+    of dbt's state:modified; config-only/macro-only changes are a documented gap.
+    A declared rename (``current_uid`` in ``renames``) is always selected."""
+    renames = renames or {}
     changed = []
     for uid, node in current.items():
+        if uid in renames:
+            changed.append(uid)
+            continue
         base = baseline.get(uid)
         if base is None:
             changed.append(uid)
