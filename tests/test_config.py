@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
-from costgate.config import Config
+from costgate.config import CONFIG_REFERENCE, Config, Thresholds
 
 
 def test_load_missing_file_returns_defaults(tmp_path: Path):
@@ -75,3 +76,68 @@ pricing:
     )
     with pytest.raises(ValueError, match="europe-west3"):
         Config.load(None, tmp_path)
+
+
+# --- config reference registry (drift guards) ---
+
+
+def _config_attr_paths() -> set[str]:
+    """Every settable Config attribute, expanding the nested Thresholds container."""
+    paths: set[str] = set()
+    for f in fields(Config):
+        if f.name == "thresholds":
+            paths.update(f"thresholds.{sf.name}" for sf in fields(Thresholds))
+        else:
+            paths.add(f.name)
+    return paths
+
+
+def _get(obj, dotted: str):
+    for part in dotted.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def test_registry_keys_unique_and_nonempty():
+    keys = [cf.key for cf in CONFIG_REFERENCE]
+    assert keys
+    assert len(keys) == len(set(keys))
+
+
+def test_registry_covers_every_config_field_bidirectionally():
+    # equality, not subset: a new Config field with no registry entry (or a stray
+    # registry entry) breaks this in one direction or the other.
+    assert {cf.attr for cf in CONFIG_REFERENCE} == _config_attr_paths()
+
+
+def test_every_documented_key_is_honored_by_the_parser(tmp_path: Path):
+    # a config that sets every documented key to a non-default value
+    (tmp_path / ".costgate.yml").write_text(
+        """
+pricing:
+  region: europe-west3
+  usd_per_tib: 5.0
+  regions:
+    US: 6.0
+thresholds:
+  max_usd_increase_per_run: 5.0
+  max_pct_increase: 25
+  max_usd_increase_per_month: 100.0
+run_frequency:
+  default: 30
+  models:
+    fct_orders_daily: 60
+exclude:
+  - events
+warn_only:
+  - sessions
+report:
+  format: markdown
+fail_on: warn
+""",
+        "utf-8",
+    )
+    cfg = Config.load(None, tmp_path)
+    for entry in CONFIG_REFERENCE:
+        # each documented key's value actually landed — proving key ↔ parser match
+        assert _get(cfg, entry.attr) != entry.default, entry.key

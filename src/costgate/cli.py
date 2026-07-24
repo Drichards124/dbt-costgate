@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from costgate import __version__, artifacts, estimate, gitdiff, policy, report
 from costgate.artifacts import ArtifactError
 from costgate.bigquery import BigQueryDryRunner, DryRunner
-from costgate.config import Config
+from costgate.config import CONFIG_REFERENCE, Config
 from costgate.gitdiff import GitDiffError
 from costgate.models import PricingDisclosure, Report
 from costgate.pricing import PricingTable
@@ -65,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--max-usd-per-month", type=float, help="Fail if $/month increase exceeds this."
     )
+
+    cfg = sub.add_parser(
+        "config",
+        help="List every .costgate.yml key with a plain-English explanation.",
+        description=(
+            "Print the full configuration reference — every key costgate reads "
+            "from .costgate.yml, its type, default, and what it does. Use "
+            "--format json for a machine-readable list."
+        ),
+    )
+    cfg.add_argument("--format", choices=["terminal", "json"], default="terminal")
+
     return parser
 
 
@@ -210,11 +223,32 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     return verdict.exit_code
 
 
+def run_config(args: argparse.Namespace) -> int:
+    if args.format == "json":
+        payload = [
+            {"key": f.key, "type": f.type_label, "default": f.default, "help": f.help}
+            for f in CONFIG_REFERENCE
+        ]
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    key_w = max(len(f.key) for f in CONFIG_REFERENCE)
+    type_w = max(len(f.type_label) for f in CONFIG_REFERENCE)
+    print("costgate configuration keys (.costgate.yml). CLI flags override the file.\n")
+    for f in CONFIG_REFERENCE:
+        default = "none" if f.default is None else str(f.default)
+        print(f"{f.key.ljust(key_w)}  {f.type_label.ljust(type_w)}  default: {default}")
+        print(f"    {f.help}")
+    return 0
+
+
 def main(argv: list[str] | None = None, runner: DryRunner | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check":
         return run_check(args, runner=runner)
+    if args.command == "config":
+        return run_config(args)
     parser.print_help()
     return 0
 
