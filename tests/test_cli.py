@@ -20,6 +20,33 @@ def test_absolute_mode_reports_and_exits_zero(tmp_path: Path, capsys):
     assert "fct" in out and "scanned" in out
 
 
+def test_absolute_usd_cap_fails_in_local_mode(tmp_path: Path, capsys):
+    # No baseline: an absolute cap gates the model's total per-run cost.
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": TIB})  # ~$6.25/run on the US on-demand rate
+    code = main(
+        ["check", "--current", str(target), "--select", "fct", "--max-usd-total", "1.0"],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "GATE: FAIL" in out
+    assert "exceeds cap" in out
+
+
+def test_absolute_tib_cap_fails_in_local_mode(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": TIB})  # 1.00 TiB scanned
+    code = main(
+        ["check", "--current", str(target), "--select", "fct", "--max-tib-total", "0.5"],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "GATE: FAIL" in out
+    assert "TiB" in out
+
+
 def test_diff_mode_gate_fails_when_over_threshold(tmp_path: Path, capsys):
     target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="new"))
     baseline = tmp_path / "base.json"

@@ -8,7 +8,7 @@ or user-excluded models are reported but never cause a failure.
 from __future__ import annotations
 
 from costgate.config import Config, Thresholds
-from costgate.models import CostDelta, Status, Verdict
+from costgate.models import TIB, CostDelta, Status, Verdict
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -52,4 +52,12 @@ def _breaches_for(d: CostDelta, thr: Thresholds) -> list[str]:
                 f"{d.name}: +${month_delta:,.2f}/month exceeds "
                 f"${thr.max_usd_increase_per_month:,.2f}"
             )
+    # Absolute ceilings: gate the total per-run cost/scan, not the increase.
+    if thr.max_usd_total is not None and d.usd_current is not None:
+        if d.usd_current > thr.max_usd_total:
+            out.append(f"{d.name}: ${d.usd_current:,.2f}/run exceeds cap ${thr.max_usd_total:,.2f}")
+    if thr.max_tib_total is not None and d.bytes_current is not None:
+        tib = d.bytes_current / TIB
+        if tib > thr.max_tib_total:
+            out.append(f"{d.name}: {tib:,.2f} TiB/run exceeds cap {thr.max_tib_total:,.2f} TiB")
     return out

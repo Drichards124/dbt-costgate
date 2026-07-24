@@ -15,6 +15,10 @@ class Thresholds:
     max_usd_increase_per_run: float | None = None
     max_pct_increase: float | None = None
     max_usd_increase_per_month: float | None = None
+    # Absolute per-run ceilings: gate a model's total cost/scan, not its increase.
+    # No baseline needed, so they also gate local (zero-setup) runs.
+    max_usd_total: float | None = None
+    max_tib_total: float | None = None
 
     @property
     def any_set(self) -> bool:
@@ -24,6 +28,8 @@ class Thresholds:
                 self.max_usd_increase_per_run,
                 self.max_pct_increase,
                 self.max_usd_increase_per_month,
+                self.max_usd_total,
+                self.max_tib_total,
             )
         )
 
@@ -73,6 +79,8 @@ class Config:
                 max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
                 max_pct_increase=_opt_float(thr.get("max_pct_increase")),
                 max_usd_increase_per_month=_opt_float(thr.get("max_usd_increase_per_month")),
+                max_usd_total=_opt_float(thr.get("max_usd_total")),
+                max_tib_total=_opt_float(thr.get("max_tib_total")),
             ),
             run_frequency_default=_opt_int(freq.get("default")),
             run_frequency_models={k: int(v) for k, v in (freq.get("models") or {}).items()},
@@ -167,6 +175,22 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's projected monthly cost increase exceeds this many USD.",
+    ),
+    ConfigField(
+        "thresholds.max_usd_total",
+        "thresholds.max_usd_total",
+        "float",
+        None,
+        "Absolute ceiling: gate fails if a model's total per-run cost exceeds this "
+        "many USD, regardless of its increase. Needs no baseline (works in local mode).",
+    ),
+    ConfigField(
+        "thresholds.max_tib_total",
+        "thresholds.max_tib_total",
+        "float",
+        None,
+        "Absolute ceiling: gate fails if a model's total per-run scan exceeds this "
+        "many TiB, regardless of its increase. Needs no baseline (works in local mode).",
     ),
     ConfigField(
         "run_frequency.default",

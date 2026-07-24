@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--max-usd-total` / `--max-tib-total`** on `costgate check` (and
+  `thresholds.max_usd_total` / `thresholds.max_tib_total` in `.costgate.yml`) —
+  absolute per-run ceilings that fail the gate when a single model's *total* cost
+  or scan exceeds the cap, regardless of how much it changed. They need no
+  baseline, so they gate the zero-setup local run and also catch an
+  already-expensive model that a before/after diff would pass because it barely
+  changed. For incrementals the figure is the full-refresh scan.
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

@@ -49,6 +49,21 @@ costgate — region: US · on-demand $6.25/TiB · built-in table
 Pick models explicitly with `--select name1,name2` (e.g. pipe
 `dbt ls --select state:modified` for dbt-authoritative selection).
 
+### Gate locally with absolute ceilings
+
+You can fail the run here — no baseline required — with an **absolute** cap on any
+single model's total per-run cost or scan:
+
+```bash
+costgate check --max-usd-total 20 --max-tib-total 3
+```
+
+These gate the *total* (not the increase), so they also catch an already-expensive
+model that a before/after diff would wave through because it barely changed. For
+incrementals the figure is the full-refresh scan (flagged `full-refresh`), so an
+absolute cap gates rebuild cost. Set them in `.costgate.yml` under `thresholds` to
+apply everywhere (see [Configuration](#configuration-costgateyml)).
+
 ## CI: before/after diff and gating
 
 To show the **change** in cost (and block a PR that crosses a threshold), give
@@ -223,9 +238,11 @@ pricing:
     europe-west3: 4.80          #   region keys match case-insensitively
     US: 6.00                    #   0.00 is valid (e.g. flat-rate slots); negative is rejected
 thresholds:
-  max_usd_increase_per_run: 5.00
+  max_usd_increase_per_run: 5.00     # delta vs baseline (needs --baseline/--against)
   max_pct_increase: 25
   max_usd_increase_per_month: 100.00
+  max_usd_total: 20.00              # absolute $/run cap — no baseline; gates local runs too
+  max_tib_total: 3.00              # absolute TiB/run cap — no baseline; gates local runs too
 run_frequency:
   default: 30                   # runs/month, for the $/month estimate
   models:
