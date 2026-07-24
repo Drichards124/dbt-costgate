@@ -88,6 +88,10 @@ is a documented proxy, not an invoice prediction.
 
 ## Roadmap notes
 
-- One-command local diff (`--against <ref>`) via an isolated git worktree.
 - Per-region custom pricing overrides in config.
 - Production actuals from `INFORMATION_SCHEMA.JOBS`.
+
+Shipped: one-command local diff (`--against <ref>`) — checks the ref out into an
+isolated git worktree, `dbt compile`s it as the baseline, and removes the worktree
+after. The one edge that needs both git and dbt, so it lives outside the pure core
+and outside git-only `gitdiff.py` (see [[0006-consume-compiled-artifacts]]).

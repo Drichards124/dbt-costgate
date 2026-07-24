@@ -79,7 +79,9 @@ costgate — region: US · on-demand $6.25/TiB · built-in table
 ```
 
 Or run it with no baseline at all for an instant local read of what your changed
-models scan — see the [usage guide](docs/usage.md).
+models scan — or get the full before/after locally in one command with
+`costgate check --against main` (costgate compiles `main` for you in a throwaway
+worktree). See the [usage guide](docs/usage.md).
 
 </details>
 
@@ -139,7 +141,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 ## Roadmap
 
 - [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
-- [ ] **One-command local diff** — `costgate check --against main` (isolated git worktree)
+- [x] **One-command local diff** — `costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)

@@ -8,7 +8,8 @@ import json
 import sys
 from pathlib import Path
 
-from costgate import __version__, artifacts, estimate, gitdiff, policy, report
+from costgate import __version__, against, artifacts, estimate, gitdiff, policy, report
+from costgate.against import AgainstError
 from costgate.artifacts import ArtifactError
 from costgate.bigquery import BigQueryDryRunner, DryRunner
 from costgate.config import CONFIG_REFERENCE, Config
@@ -30,9 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Estimate the BigQuery cost impact of changed dbt models.",
         description=(
             "Dry-run the models this change touches and report their scan cost. "
-            "With --baseline, reports the before/after diff and can gate on "
-            "thresholds. Without it (local default), reports each changed model's "
-            "current scan cost. Selection: --select wins, else --baseline diff, "
+            "With --baseline (or --against <ref>, which auto-compiles that ref in "
+            "an isolated worktree), reports the before/after diff and can gate on "
+            "thresholds. Without one (local default), reports each changed model's "
+            "current scan cost. Selection: --select wins, else the baseline diff, "
             "else `git diff` vs main. Detects added and body-modified models; "
             "config-only and macro-only changes are not yet detected."
         ),
@@ -45,6 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--baseline",
         help="Path to the baseline (main, compiled the same way) manifest.json for a diff.",
+    )
+    check.add_argument(
+        "--against",
+        help=(
+            "Git ref to auto-compile as the baseline in an isolated worktree "
+            "(removes the manual --baseline step). Mutually exclusive with --baseline."
+        ),
     )
     check.add_argument(
         "--select",
@@ -149,6 +158,13 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     config = Config.load(Path(args.config) if args.config else None, project_dir)
     config = _apply_overrides(config, args)
 
+    if args.against and args.baseline:
+        print(
+            "costgate: use either --against <ref> or --baseline <manifest>, not both.",
+            file=sys.stderr,
+        )
+        return policy.EXIT_OPERATIONAL
+
     try:
         current_manifest = artifacts.load_manifest(current_arg)
     except ArtifactError as exc:
@@ -164,13 +180,29 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             print(f"costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
         baseline_nodes = artifacts.model_nodes(baseline_manifest)
-        if not artifacts.has_any_compiled_code(baseline_nodes):
+    elif args.against:
+        # Pre-flight before the 5–30s worktree+compile: bail if the current side
+        # can't be dry-run anyway.
+        if not artifacts.has_any_compiled_code(current_nodes):
             print(
-                "costgate: the baseline manifest has no compiled SQL — it must be "
-                "produced by `dbt compile` (a `dbt parse` manifest won't work).",
+                "costgate: no compiled SQL in the current target — run `dbt compile` "
+                "on your branch before --against <ref>.",
                 file=sys.stderr,
             )
             return policy.EXIT_OPERATIONAL
+        try:
+            baseline_nodes = against.compiled_baseline(args.against, project_dir)
+        except AgainstError as exc:
+            print(f"costgate: {exc}", file=sys.stderr)
+            return policy.EXIT_OPERATIONAL
+
+    if baseline_nodes is not None and not artifacts.has_any_compiled_code(baseline_nodes):
+        print(
+            "costgate: the baseline manifest has no compiled SQL — it must be "
+            "produced by `dbt compile` (a `dbt parse` manifest won't work).",
+            file=sys.stderr,
+        )
+        return policy.EXIT_OPERATIONAL
 
     try:
         selected = _select(args, current_nodes, baseline_nodes, project_dir)
