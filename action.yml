@@ -7,7 +7,8 @@ branding:
   color: green
 
 # --- Input ↔ `costgate check` flag map (CLAUDE.md §6 — keep in sync with cli.py) ---
-#   current→--current  baseline→--baseline  project-dir→--project-dir
+#   current→--current  baseline→--baseline  baseline-target→--baseline-target
+#   project-dir→--project-dir
 #   config→--config  select→--select  base→--base  fail-on→--fail-on
 #   max-usd-per-run→--max-usd-per-run  max-pct→--max-pct
 #   max-usd-per-month→--max-usd-per-month  max-usd-total→--max-usd-total
@@ -25,6 +26,9 @@ inputs:
     default: target
   baseline:
     description: Baseline (main, compiled the same way) manifest.json for a before/after diff.
+    default: ""
+  baseline-target:
+    description: Name of a baseline defined under `baselines:` in .costgate.yml (a manifest path or a git ref). A `manifest` target works in CI; an `against` target needs full git history + dbt in the runner.
     default: ""
   project-dir:
     description: Directory containing dbt_project.yml, when it can't be inferred from `current` (e.g. a monorepo subdir or a copied manifest).
@@ -95,6 +99,7 @@ runs:
       env:
         CURRENT: ${{ inputs.current }}
         BASELINE: ${{ inputs.baseline }}
+        BASELINE_TARGET: ${{ inputs.baseline-target }}
         PROJECT_DIR: ${{ inputs.project-dir }}
         CONFIG: ${{ inputs.config }}
         SELECT: ${{ inputs.select }}
@@ -131,6 +136,7 @@ runs:
         REPORT="$RUNNER_TEMP/costgate-report.md"
         args=(check --format markdown --output "$REPORT" --current "$CURRENT")
         [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
+        [ -n "$BASELINE_TARGET" ] && args+=(--baseline-target "$BASELINE_TARGET")
         [ -n "$PROJECT_DIR" ] && args+=(--project-dir "$PROJECT_DIR")
         [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
         [ -n "$SELECT" ] && args+=(--select "$SELECT")

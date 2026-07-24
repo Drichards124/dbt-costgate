@@ -128,6 +128,34 @@ Notes:
   it's faster (no second compile) and doesn't depend on the base ref being
   buildable from the PR runner.
 
+### Name your baselines (`baselines:` + `--baseline-target`)
+
+Rather than retyping `--baseline <path>` or `--against <ref>` every run — or pointing
+at different environments by hand — name your baselines once in `.costgate.yml` and
+switch by name, like dbt's `--target`:
+
+```yaml
+# .costgate.yml
+baselines:
+  main:
+    against: main                       # compile this git ref for the baseline
+  ple:
+    manifest: artifacts/ple/manifest.json   # a prebuilt manifest (production-like env)
+  prod:
+    against: origin/production
+default_baseline: main                  # used when no baseline flag is given
+```
+
+- Each entry is **exactly one** of `manifest:` (a path) or `against:` (a git ref).
+- Select one with `costgate check --baseline-target ple`. With `default_baseline` set,
+  a bare `costgate check` uses it — no flag needed.
+- Precedence: an explicit `--baseline`/`--against` wins, then `--baseline-target`, then
+  `default_baseline`, then no baseline (local mode). Passing more than one is an error.
+- **Works the same in CI and locally** — it's config, so the GitHub Action reads it too
+  (or pass the `baseline-target` input). One caveat on portability: a `manifest:` target
+  travels to CI as long as the path exists in the runner; an `against:` target compiles a
+  ref, so in CI it needs full git history + dbt available (locally it just works).
+
 ### Renamed a model?
 
 costgate pairs baseline↔current models by dbt identity (`unique_id`), which is
@@ -154,6 +182,25 @@ renames:
   an actionable message — it never silently mis-diffs.
 - `--select` targets **current** model names: a renamed model is selected by its
   new name, then diffed via the map.
+
+## Audit / monitor-only (track cost without blocking)
+
+Not every team wants the gate to block a merge — some just want the cost record for
+internal tracking. costgate supports that without ever blocking a deploy:
+
+- **`fail_on: never`** (`.costgate.yml`), `--fail-on never`, or the Action's
+  `fail-on: never` input — thresholds still evaluate and any breach is shown as a
+  *warning*, but the exit code is always **0**, so the check never blocks.
+- **Set no thresholds at all** — with nothing to breach, every run is `PASS` and you
+  simply get the per-model cost report.
+- **`--format json`** — a machine-readable per-model record (bytes, `$`, region,
+  `$/month`) to archive as a CI artifact or load into a warehouse table for auditing.
+  The report always renders, pass or fail.
+- Per model: **`exclude:`** (reported, never gated) and **`warn_only:`** (shown as a
+  warning, never blocks).
+
+This also gives a gradual rollout: start `never` (observe), move to `warn`
+(soft-signal), then `fail` (enforce) once the team is comfortable.
 
 ## GitHub Action
 
@@ -280,6 +327,12 @@ warn_only:                      # shown as a warning, not gated
   - sessions_rolling
 renames:                        # pair a renamed model to its baseline (current: baseline)
   fct_orders_daily: fct_orders_monthly
+baselines:                      # named baseline sources (select with --baseline-target)
+  main:
+    against: main               #   a git ref to compile
+  ple:
+    manifest: artifacts/ple/manifest.json  # or a prebuilt manifest path
+default_baseline: main          # baseline used when no --baseline/--against/--baseline-target
 report:
   format: terminal              # terminal | markdown | json
 fail_on: fail                   # never | warn | fail

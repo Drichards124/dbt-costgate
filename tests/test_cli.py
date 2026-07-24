@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
+import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from conftest import FakeDryRunner, make_manifest, make_node, write_target
-from costgate.cli import main
+from costgate.cli import _resolve_baseline, _UsageError, main
+from costgate.config import BaselineTarget, Config
 from costgate.models import TIB, ErrorKind
 
 
@@ -126,6 +130,97 @@ def test_misconfigured_rename_exits_operational(tmp_path: Path, capsys):
     err = capsys.readouterr().err
     assert code == 2
     assert "ghost_model" in err
+
+
+# --- named baseline targets (F2/F3) ---
+
+
+def _bargs(baseline=None, against=None, baseline_target=None):
+    return argparse.Namespace(baseline=baseline, against=against, baseline_target=baseline_target)
+
+
+def test_resolve_baseline_precedence_and_named_targets():
+    cfg = Config(
+        baselines={
+            "ple": BaselineTarget(manifest="p.json"),
+            "main": BaselineTarget(against="main"),
+        },
+        default_baseline="main",
+    )
+    assert _resolve_baseline(_bargs(baseline="b.json"), cfg) == ("b.json", None)
+    assert _resolve_baseline(_bargs(against="dev"), cfg) == (None, "dev")
+    assert _resolve_baseline(_bargs(baseline_target="ple"), cfg) == ("p.json", None)
+    assert _resolve_baseline(_bargs(), cfg) == (None, "main")  # config default
+    assert _resolve_baseline(_bargs(), Config()) == (None, None)  # no config -> local mode
+
+
+def test_resolve_baseline_rejects_misuse():
+    cfg = Config(baselines={"bad": BaselineTarget(manifest="m", against="a")})
+    with pytest.raises(_UsageError, match="only one"):
+        _resolve_baseline(_bargs(baseline="b", baseline_target="x"), cfg)
+    with pytest.raises(_UsageError, match="not defined"):
+        _resolve_baseline(_bargs(baseline_target="ghost"), cfg)
+    with pytest.raises(_UsageError, match="exactly one"):
+        _resolve_baseline(_bargs(baseline_target="bad"), cfg)
+
+
+def test_baseline_target_manifest_produces_diff(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="n"))
+    base = _write_baseline(tmp_path, make_node("m", compiled_code="BASE_m", checksum="o"))
+    (tmp_path / ".costgate.yml").write_text(
+        f'baselines:\n  ple:\n    manifest: "{base.as_posix()}"\n', "utf-8"
+    )
+    runner = FakeDryRunner({"CUR_m": 3 * TIB, "BASE_m": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--baseline-target",
+            "ple",
+            "--config",
+            str(tmp_path / ".costgate.yml"),
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "→" in out  # a before/after diff row rendered
+
+
+def test_default_baseline_used_without_any_flag(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="n"))
+    base = _write_baseline(tmp_path, make_node("m", compiled_code="BASE_m", checksum="o"))
+    (tmp_path / ".costgate.yml").write_text(
+        f'baselines:\n  main:\n    manifest: "{base.as_posix()}"\ndefault_baseline: main\n', "utf-8"
+    )
+    runner = FakeDryRunner({"CUR_m": 2 * TIB, "BASE_m": TIB})
+    code = main(
+        ["check", "--current", str(target), "--config", str(tmp_path / ".costgate.yml")],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "→" in out
+
+
+def test_unknown_baseline_target_exits_2(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("m", compiled_code="CUR_m"))
+    (tmp_path / ".costgate.yml").write_text("baselines:\n  main:\n    against: main\n", "utf-8")
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--baseline-target",
+            "ghost",
+            "--config",
+            str(tmp_path / ".costgate.yml"),
+        ],
+        runner=FakeDryRunner({"CUR_m": TIB}),
+    )
+    assert code == 2
+    assert "ghost" in capsys.readouterr().err
 
 
 def test_diff_mode_passes_under_threshold(tmp_path: Path):
