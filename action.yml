@@ -110,7 +110,8 @@ runs:
 
         # 2. Build the argv, adding each optional flag only when its input is set,
         #    so an empty input never becomes an empty-string flag and .costgate.yml
-        #    stays authoritative. Inputs arrive via env — no ${{ }} in the script.
+        #    stays authoritative. Inputs arrive via env — no GitHub expressions,
+        #    and so no injection, in the script body.
         REPORT="$RUNNER_TEMP/costgate-report.md"
         args=(check --format markdown --output "$REPORT" --current "$CURRENT")
         [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
