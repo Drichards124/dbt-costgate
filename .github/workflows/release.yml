@@ -37,7 +37,7 @@ jobs:
 
       - name: Checksum the artifacts
         run: |
-          cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS
+          ( cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS )
           cat dist/SHA256SUMS
 
       - name: Install the built wheel into a clean environment and verify it
