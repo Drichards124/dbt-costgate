@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-24
+
+### Added
+
+- **GitHub Action** — gate pull requests with a single `uses:` step. The Action
+  runs `costgate check` and posts one **sticky** comment with the cost report,
+  updating that same comment on each new commit instead of stacking new ones.
+  - Fails the check when the gate is breached (exit `1`). Operational errors
+    (exit `2`, e.g. missing credentials) are **alert-only** by default; set
+    `fail-on-operational: true` to hard-fail instead.
+  - On an operational error the comment says costgate couldn't run, so a stale
+    passing report never lingers over a commit that wasn't evaluated.
+  - Fork pull requests degrade to no comment (never a failed check).
+  - Inputs mirror the `check` flags (`baseline`, `config`, `select`, `fail-on`,
+    `max-usd-per-run`, `max-pct`, `max-usd-per-month`, `region`, `usd-per-tib`,
+    `project`, …); outputs `exit-code` and `status`.
+  - See [docs/usage.md](docs/usage.md) for a ready-to-copy workflow.
+
 ## [0.1.0] - 2026-07-24
 
 ### Added

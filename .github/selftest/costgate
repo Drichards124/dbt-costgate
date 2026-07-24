@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test double for the costgate CLI — used ONLY by action-selftest.yml to exercise
+# action.yml's orchestration without BigQuery. Writes a canned markdown report to
+# --output and exits with $SHIM_EXIT (default 0). On exit 2 it writes NOTHING,
+# reproducing costgate's real "no report on operational error" behavior so the
+# action's synthesized-body path is exercised.
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output)
+      shift
+      out="$1"
+      ;;
+  esac
+  shift
+done
+code="${SHIM_EXIT:-0}"
+if [ "$code" != "2" ] && [ -n "$out" ]; then
+  printf '### 💸 costgate — cost impact of this change\n\n_self-test report_\n' >"$out"
+fi
+exit "$code"
