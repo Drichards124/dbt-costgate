@@ -7,20 +7,27 @@ branding:
   color: green
 
 # --- Input ↔ `costgate check` flag map (CLAUDE.md §6 — keep in sync with cli.py) ---
-#   current→--current  baseline→--baseline  config→--config  select→--select
-#   base→--base  fail-on→--fail-on  max-usd-per-run→--max-usd-per-run
-#   max-pct→--max-pct  max-usd-per-month→--max-usd-per-month  region→--region
-#   usd-per-tib→--usd-per-tib  project→--project  threads→--threads
+#   current→--current  baseline→--baseline  project-dir→--project-dir
+#   config→--config  select→--select  base→--base  fail-on→--fail-on
+#   max-usd-per-run→--max-usd-per-run  max-pct→--max-pct
+#   max-usd-per-month→--max-usd-per-month  max-usd-total→--max-usd-total
+#   max-tib-total→--max-tib-total  region→--region  usd-per-tib→--usd-per-tib
+#   project→--project  threads→--threads
 # Deliberately NOT exposed (CLAUDE.md §7 completeness — silence ≠ coverage):
-#   the `config` subcommand, and `--format {terminal,json}`. The Action always
-#   runs `check --format markdown`; every other input defaults empty so the
-#   caller's `.costgate.yml` stays authoritative.
+#   the `config` subcommand; `--format {terminal,json}` (the Action always runs
+#   `check --format markdown`); and `--against <ref>`, which compiles a ref in a
+#   throwaway worktree and needs full git history + dbt in the runner — a local
+#   convenience, whereas CI supplies the baseline manifest via `baseline`. Every
+#   other input defaults empty so the caller's `.costgate.yml` stays authoritative.
 inputs:
   current:
     description: Compiled dbt target dir or manifest.json for this PR.
     default: target
   baseline:
     description: Baseline (main, compiled the same way) manifest.json for a before/after diff.
+    default: ""
+  project-dir:
+    description: Directory containing dbt_project.yml, when it can't be inferred from `current` (e.g. a monorepo subdir or a copied manifest).
     default: ""
   config:
     description: Path to a costgate config file (default .costgate.yml).
@@ -42,6 +49,12 @@ inputs:
     default: ""
   max-usd-per-month:
     description: Fail if the per-month cost increase exceeds this many USD.
+    default: ""
+  max-usd-total:
+    description: Fail if a model's total (absolute) per-run cost exceeds this many USD. Needs no baseline.
+    default: ""
+  max-tib-total:
+    description: Fail if a model's total (absolute) per-run scan exceeds this many TiB. Needs no baseline.
     default: ""
   region:
     description: Force a pricing region (default auto-detect).
@@ -82,6 +95,7 @@ runs:
       env:
         CURRENT: ${{ inputs.current }}
         BASELINE: ${{ inputs.baseline }}
+        PROJECT_DIR: ${{ inputs.project-dir }}
         CONFIG: ${{ inputs.config }}
         SELECT: ${{ inputs.select }}
         BASE: ${{ inputs.base }}
@@ -89,6 +103,8 @@ runs:
         MAX_USD_PER_RUN: ${{ inputs.max-usd-per-run }}
         MAX_PCT: ${{ inputs.max-pct }}
         MAX_USD_PER_MONTH: ${{ inputs.max-usd-per-month }}
+        MAX_USD_TOTAL: ${{ inputs.max-usd-total }}
+        MAX_TIB_TOTAL: ${{ inputs.max-tib-total }}
         REGION: ${{ inputs.region }}
         USD_PER_TIB: ${{ inputs.usd-per-tib }}
         PROJECT: ${{ inputs.project }}
@@ -115,6 +131,7 @@ runs:
         REPORT="$RUNNER_TEMP/costgate-report.md"
         args=(check --format markdown --output "$REPORT" --current "$CURRENT")
         [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
+        [ -n "$PROJECT_DIR" ] && args+=(--project-dir "$PROJECT_DIR")
         [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
         [ -n "$SELECT" ] && args+=(--select "$SELECT")
         [ -n "$BASE" ] && args+=(--base "$BASE")
@@ -122,6 +139,8 @@ runs:
         [ -n "$MAX_USD_PER_RUN" ] && args+=(--max-usd-per-run "$MAX_USD_PER_RUN")
         [ -n "$MAX_PCT" ] && args+=(--max-pct "$MAX_PCT")
         [ -n "$MAX_USD_PER_MONTH" ] && args+=(--max-usd-per-month "$MAX_USD_PER_MONTH")
+        [ -n "$MAX_USD_TOTAL" ] && args+=(--max-usd-total "$MAX_USD_TOTAL")
+        [ -n "$MAX_TIB_TOTAL" ] && args+=(--max-tib-total "$MAX_TIB_TOTAL")
         [ -n "$REGION" ] && args+=(--region "$REGION")
         [ -n "$USD_PER_TIB" ] && args+=(--usd-per-tib "$USD_PER_TIB")
         [ -n "$PROJECT" ] && args+=(--project "$PROJECT")

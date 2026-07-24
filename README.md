@@ -13,7 +13,7 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 [![Python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://docs.astral.sh/ruff/)
-[![Status](https://img.shields.io/badge/status-pre--MVP-orange)](#roadmap)
+[![Status](https://img.shields.io/badge/status-MVP-brightgreen)](#roadmap)
 
 [How it works](#how-it-works) ·
 [What you get](#what-you-get-on-every-pr) ·
@@ -79,9 +79,10 @@ costgate — region: US · on-demand $6.25/TiB · built-in table
 ```
 
 Or run it with no baseline at all for an instant local read of what your changed
-models scan — or get the full before/after locally in one command with
-`costgate check --against main` (costgate compiles `main` for you in a throwaway
-worktree). See the [usage guide](docs/usage.md).
+models scan — and fail the run there on an absolute `--max-usd-total` /
+`--max-tib-total` ceiling (no baseline required) — or get the full before/after
+locally in one command with `costgate check --against main` (costgate compiles
+`main` for you in a throwaway worktree). See the [usage guide](docs/usage.md).
 
 </details>
 
@@ -93,7 +94,7 @@ worktree). See the [usage guide](docs/usage.md).
 | 2 · **Compile both versions** | The baseline and PR-branch versions of each changed model | free |
 | 3 · **Dry-run each** | BigQuery `dryRun=true` returns exact bytes scanned — executes nothing, reads no table data | **free** |
 | 4 · **Price the diff** | Region-aware on-demand rates; optionally × run frequency for $/month | free |
-| 5 · **Gate** | Markdown PR comment, machine-readable JSON, policy-driven exit code (fail on $ and/or % increase) | free |
+| 5 · **Gate** | Markdown PR comment, machine-readable JSON, policy-driven exit code (fail on a $ and/or % increase, or an absolute $/run or TiB/run ceiling) | free |
 
 ## Where it fits
 
@@ -143,7 +144,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [x] **One-command local diff** — `costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
-- [ ] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
+- [x] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API
