@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+# Cut a GitHub Release when a vX.Y.Z tag is pushed to main. Builds the wheel and
+# sdist, checksums them, smoke-tests the built wheel, and publishes a Release with
+# those artifacts and the CHANGELOG section for the version. No PyPI publish.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write # only to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify tag matches package version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/costgate/__init__.py').read_text()).group(1))")"
+          if [ "$version" != "$pkg" ]; then
+            echo "Tag $GITHUB_REF_NAME (version $version) does not match package version $pkg."
+            exit 1
+          fi
+          echo "Tag matches package version $pkg."
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Checksum the artifacts
+        run: |
+          cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS
+          cat dist/SHA256SUMS
+
+      - name: Install the built wheel into a clean environment and verify it
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/costgate --version
+          got="$(/tmp/smoke/bin/python -c "import costgate; print(costgate.__version__)")"
+          if [ "$got" != "$version" ]; then
+            echo "Installed wheel reports version $got, expected $version."
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { flag=1; next }
+            /^## \[/ { flag=0 }
+            flag { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          [ -s RELEASE_NOTES.md ] || { echo "no CHANGELOG section for $version"; exit 1; }
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "costgate $GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md
