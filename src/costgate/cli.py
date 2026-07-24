@@ -163,12 +163,12 @@ def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
     )
 
 
-def _select(args, current_nodes, baseline_nodes, project_dir) -> list[str]:
+def _select(args, current_nodes, baseline_nodes, project_dir, renames=None) -> list[str]:
     if args.select:
         wanted = {s.strip() for s in args.select.split(",") if s.strip()}
         return [uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted]
     if baseline_nodes is not None:
-        return artifacts.select_changed(baseline_nodes, current_nodes)
+        return artifacts.select_changed(baseline_nodes, current_nodes, renames)
     return gitdiff.select_by_git(current_nodes, project_dir, args.base)
 
 
@@ -235,8 +235,18 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         )
         return policy.EXIT_OPERATIONAL
 
+    # Resolve the rename map (current -> baseline) once the manifests are loaded.
+    # Only meaningful with a baseline; a bad entry fails loudly rather than mis-diffing.
+    renames: dict[str, str] = {}
+    if baseline_nodes is not None and config.renames:
+        try:
+            renames = artifacts.resolve_renames(config.renames, current_nodes, baseline_nodes)
+        except ArtifactError as exc:
+            print(f"costgate: {exc}", file=sys.stderr)
+            return policy.EXIT_OPERATIONAL
+
     try:
-        selected = _select(args, current_nodes, baseline_nodes, project_dir)
+        selected = _select(args, current_nodes, baseline_nodes, project_dir, renames)
     except GitDiffError as exc:
         print(f"costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
@@ -253,6 +263,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         current_dir=target_dir,
         diff_mode=diff_mode,
         threads=args.threads,
+        renames=renames,
     )
 
     if selected and estimate.has_only_operational_failures(estimates):

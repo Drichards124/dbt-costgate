@@ -25,9 +25,14 @@ def estimate_models(
     current_dir: Path | None,
     diff_mode: bool,
     threads: int = 8,
+    renames: dict[str, str] | None = None,
 ) -> list[ModelEstimate]:
+    renames = renames or {}
+
     def work(uid: str) -> ModelEstimate:
-        return _estimate_one(uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode)
+        return _estimate_one(
+            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames
+        )
 
     if threads <= 1 or len(selected) <= 1:
         results = [work(uid) for uid in selected]
@@ -45,14 +50,22 @@ def _estimate_one(
     runner: DryRunner,
     current_dir: Path | None,
     diff_mode: bool,
+    renames: dict[str, str],
 ) -> ModelEstimate:
     node = current_nodes[uid]
     base = baseline_nodes.get(uid)
+    renamed_base = None
+    if base is None:
+        renamed_uid = renames.get(uid)
+        if renamed_uid:
+            base = renamed_base = baseline_nodes.get(renamed_uid)
     est = ModelEstimate(node=node, is_new=diff_mode and base is None)
 
     current_sql = artifacts.resolve_compiled_sql(node, current_dir)
     est.basis_current = artifacts.detect_basis(node, current_sql)
     est.warnings = artifacts.sql_warnings(node, current_sql)
+    if renamed_base is not None:
+        est.warnings.append(f"compared against renamed baseline `{renamed_base.name}`")
 
     if not current_sql:
         est.error_kind = None

@@ -33,6 +33,8 @@ exclude:
   - events
 warn_only:
   - sessions
+renames:
+  fct_orders_daily: fct_orders_monthly
 report:
   format: markdown
 fail_on: warn
@@ -46,6 +48,7 @@ fail_on: warn
     assert cfg.thresholds.max_usd_total == 40.0
     assert cfg.thresholds.max_tib_total == 6.5
     assert cfg.thresholds.any_set
+    assert cfg.renames == {"fct_orders_daily": "fct_orders_monthly"}
     assert cfg.runs_per_month("fct_orders_daily") == 60
     assert cfg.runs_per_month("other") == 30
     assert cfg.exclude == ["events"]
@@ -137,6 +140,8 @@ exclude:
   - events
 warn_only:
   - sessions
+renames:
+  fct_orders_daily: fct_orders_monthly
 report:
   format: markdown
 fail_on: warn

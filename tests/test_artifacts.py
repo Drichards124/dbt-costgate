@@ -78,3 +78,69 @@ def test_sql_warnings_flags_dynamic_multistatement_and_incremental():
 def test_load_manifest_missing_raises_actionable_error(tmp_path: Path):
     with pytest.raises(ArtifactError, match="dbt compile"):
         artifacts.load_manifest(tmp_path / "target")
+
+
+# --- rename map (F1) ---
+
+
+def _bl_cur(baseline_specs, current_specs):
+    return (
+        artifacts.model_nodes(make_manifest(*baseline_specs)),
+        artifacts.model_nodes(make_manifest(*current_specs)),
+    )
+
+
+def test_resolve_renames_bare_name_both_sides():
+    baseline, current = _bl_cur([make_node("fct_orders_monthly")], [make_node("fct_orders_daily")])
+    resolved = artifacts.resolve_renames(
+        {"fct_orders_daily": "fct_orders_monthly"}, current, baseline
+    )
+    assert resolved == {"model.pkg.fct_orders_daily": "model.pkg.fct_orders_monthly"}
+
+
+def test_resolve_renames_accepts_full_unique_id():
+    baseline, current = _bl_cur([make_node("fct_orders_monthly")], [make_node("fct_orders_daily")])
+    resolved = artifacts.resolve_renames(
+        {"model.pkg.fct_orders_daily": "model.pkg.fct_orders_monthly"}, current, baseline
+    )
+    assert resolved == {"model.pkg.fct_orders_daily": "model.pkg.fct_orders_monthly"}
+
+
+def test_resolve_renames_missing_current_ref_raises():
+    baseline, current = _bl_cur([make_node("mon")], [make_node("day")])
+    with pytest.raises(ArtifactError, match="nope"):
+        artifacts.resolve_renames({"nope": "mon"}, current, baseline)
+
+
+def test_resolve_renames_missing_baseline_ref_raises():
+    baseline, current = _bl_cur([make_node("mon")], [make_node("day")])
+    with pytest.raises(ArtifactError, match="ghost"):
+        artifacts.resolve_renames({"day": "ghost"}, current, baseline)
+
+
+def test_resolve_renames_ambiguous_bare_name_tells_user_to_qualify():
+    # same bare name in two packages on the current side
+    baseline, current = _bl_cur(
+        [make_node("mon")],
+        [make_node("dupe", package="pkg_a"), make_node("dupe", package="pkg_b")],
+    )
+    with pytest.raises(ArtifactError, match="unique_id"):
+        artifacts.resolve_renames({"dupe": "mon"}, current, baseline)
+
+
+def test_resolve_renames_rejects_two_current_to_one_baseline():
+    baseline, current = _bl_cur(
+        [make_node("mon")],
+        [make_node("daily"), make_node("weekly")],
+    )
+    with pytest.raises(ArtifactError, match="same baseline"):
+        artifacts.resolve_renames({"daily": "mon", "weekly": "mon"}, current, baseline)
+
+
+def test_select_changed_always_selects_a_declared_rename():
+    # identical checksum would normally be "unchanged"; a declared rename is still shown
+    baseline = artifacts.model_nodes(make_manifest(make_node("mon", checksum="same")))
+    current = artifacts.model_nodes(make_manifest(make_node("day", checksum="same")))
+    renames = {"model.pkg.day": "model.pkg.mon"}
+    changed = {current[uid].name for uid in artifacts.select_changed(baseline, current, renames)}
+    assert changed == {"day"}
