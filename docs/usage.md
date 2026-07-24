@@ -99,9 +99,13 @@ manage. `--against` and `--baseline` are mutually exclusive.
 
 Notes:
 
-- It assumes your dbt project is at the git repo root and `dbt` is importable from
-  your environment (it resolves your venv's `dbt` even when only a shell alias is
-  on `PATH`).
+- Your dbt project can live at the git repo root or in a subdirectory (monorepos):
+  costgate detects the repo root and compiles the project in its actual location.
+  It infers the project directory from `--current` (the parent of your target dir);
+  pass `--project-dir <dir>` to state it explicitly when your compiled target isn't
+  at `<project>/target`.
+- `dbt` must be importable from your environment (it resolves your venv's `dbt`
+  even when only a shell alias is on `PATH`).
 - Your installed `dbt_packages/` are reused (symlinked into the worktree), so there
   is no `dbt deps` step — meaning the baseline compiles against *your branch's*
   package versions, close enough for a cost baseline.

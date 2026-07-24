@@ -7,9 +7,11 @@ only consumes compiled artifacts) and gitdiff.py (git-only), this edge needs
 ``dbt compile`` there, and hands the resulting manifest back as the baseline — so
 a local before/after diff is one command with no manual ``--baseline``.
 
-Assumes the dbt project sits at the git repo root (the common case, and where the
-user runs costgate). Every failure degrades to an ``AgainstError`` with an
-actionable message; the worktree is always removed, even on failure or Ctrl+C.
+The dbt project may sit at the git repo root (the common case) or in a
+subdirectory (monorepos): the repo root is detected via ``git rev-parse
+--show-toplevel``, so the worktree compile targets the project's actual location.
+Every failure degrades to an ``AgainstError`` with an actionable message; the
+worktree is always removed, even on failure or Ctrl+C.
 """
 
 from __future__ import annotations
@@ -105,6 +107,18 @@ def compiled_baseline(
     # the finally-block below genuinely can't cover.
     _git(project_dir, "worktree", "prune", check=False)
 
+    # `git worktree add` checks out the *whole* repo, so a dbt project living in a
+    # subdir lands at <worktree>/<subdir>. Locate that subdir relative to the repo
+    # root (both resolved so the macOS /tmp -> /private/tmp symlink doesn't break
+    # relative_to).
+    repo_root = Path(_git(project_dir, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
+    try:
+        subdir = project_dir.relative_to(repo_root)
+    except ValueError:
+        raise AgainstError(
+            f"project dir {project_dir} is not inside the git repo at {repo_root}."
+        ) from None
+
     verify = _git(project_dir, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
     if verify.returncode != 0:
         raise AgainstError(
@@ -118,9 +132,15 @@ def compiled_baseline(
     worktree = tmp_parent / "wt"
     try:
         _git(project_dir, "worktree", "add", "--detach", "--quiet", str(worktree), ref)
-        _link_packages(project_dir, worktree)
-        compile_fn(worktree)
-        manifest = artifacts.load_manifest(worktree / "target")
+        project_in_wt = worktree / subdir
+        if not project_in_wt.is_dir():
+            raise AgainstError(
+                f"the dbt project dir {str(subdir)!r} doesn't exist in ref {ref!r} "
+                f"— it may have been added or moved after that ref."
+            )
+        _link_packages(project_dir, project_in_wt)
+        compile_fn(project_in_wt)
+        manifest = artifacts.load_manifest(project_in_wt / "target")
         return artifacts.model_nodes(manifest)
     except artifacts.ArtifactError as exc:
         raise AgainstError(f"the baseline compile produced no usable manifest: {exc}") from exc

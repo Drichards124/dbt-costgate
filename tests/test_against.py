@@ -32,6 +32,21 @@ def _init_repo(repo: Path) -> None:
     _git(repo, "commit", "-m", "init")
 
 
+def _init_repo_subdir(repo: Path, subdir: str) -> Path:
+    """Init a repo whose dbt project lives under `subdir/` (the monorepo layout).
+    Returns the dbt project dir."""
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    proj = repo / subdir
+    (proj / "models").mkdir(parents=True)
+    (proj / "dbt_project.yml").write_text("name: t\n", "utf-8")
+    (proj / "models" / "m.sql").write_text("select 1", "utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "init")
+    return proj
+
+
 def _worktree_count(repo: Path) -> int:
     # `git worktree list` always includes the main worktree; extras are leaks.
     return len([ln for ln in _git(repo, "worktree", "list").splitlines() if ln.strip()])
@@ -105,6 +120,55 @@ def test_resolve_dbt_missing(tmp_path: Path, monkeypatch):
         against._resolve_dbt()
 
 
+def test_compiled_baseline_project_in_subdir(tmp_path: Path):
+    proj = _init_repo_subdir(tmp_path, "analytics")
+    # Host-only dbt_packages (gitignored in real projects → absent from the fresh
+    # checkout), so the link path must place them under the subdir.
+    (proj / "dbt_packages" / "dbt_utils").mkdir(parents=True)
+    seen: dict[str, bool] = {}
+
+    def compile_fn(project_in_wt: Path) -> None:
+        # Handed the project *inside the subdir* of the checkout, not the wt root.
+        seen["has_project"] = (project_in_wt / "dbt_project.yml").is_file()
+        seen["linked"] = (project_in_wt / "dbt_packages" / "dbt_utils").is_dir()
+        write_target(project_in_wt, make_manifest(make_node("m", compiled_code="BASE_m")))
+
+    nodes = against.compiled_baseline("main", proj, compile_fn=compile_fn)
+    assert seen == {"has_project": True, "linked": True}
+    assert "model.pkg.m" in nodes
+    assert _worktree_count(tmp_path) == 1
+
+
+def test_subdir_missing_in_ref_raises(tmp_path: Path):
+    # Project at the repo root on `main`; a would-be subdir exists only in the
+    # working tree, so the checked-out ref won't contain it.
+    _init_repo(tmp_path)
+    proj = tmp_path / "analytics"
+    proj.mkdir()
+    (proj / "dbt_project.yml").write_text("name: t\n", "utf-8")
+    with pytest.raises(AgainstError, match="doesn't exist in ref"):
+        against.compiled_baseline("main", proj, compile_fn=_fake_compiler({}))
+    assert _worktree_count(tmp_path) == 1
+
+
+def test_project_dir_outside_repo_raises(tmp_path: Path, monkeypatch):
+    # Force show-toplevel to report a root that isn't an ancestor of project_dir,
+    # exercising the relative_to guard (belt-and-suspenders against path drift).
+    _init_repo(tmp_path)
+    real_git = against._git
+
+    def fake_git(project_dir: Path, *args: str, check: bool = True):
+        if args[:1] == ("rev-parse",) and "--show-toplevel" in args:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{tmp_path / 'elsewhere'}\n", stderr=""
+            )
+        return real_git(project_dir, *args, check=check)
+
+    monkeypatch.setattr(against, "_git", fake_git)
+    with pytest.raises(AgainstError, match="not inside the git repo"):
+        against.compiled_baseline("main", tmp_path, compile_fn=_fake_compiler({}))
+
+
 # --- CLI wiring -------------------------------------------------------------
 
 
@@ -143,3 +207,42 @@ def test_against_end_to_end_diff_mode(tmp_path: Path, monkeypatch, capsys):
     assert code == 0
     assert "m" in out
     assert _worktree_count(tmp_path) == 1
+
+
+def test_against_project_dir_flag_decouples_from_current(tmp_path: Path, monkeypatch, capsys):
+    # dbt project in a subdir; the current manifest is stashed *outside* it (custom
+    # target-path / a copy), so the inferred project_dir would be wrong. Without
+    # --project-dir this run fails (that dir isn't the project); the flag corrects it.
+    proj = _init_repo_subdir(tmp_path, "analytics")
+    elsewhere = tmp_path / "elsewhere"
+    write_target(elsewhere, make_manifest(make_node("m", compiled_code="CUR_m", checksum="new")))
+    baseline = make_manifest(make_node("m", compiled_code="BASE_m", checksum="old"))
+    monkeypatch.setattr(against, "_dbt_compile", _fake_compiler(baseline))
+
+    runner = FakeDryRunner({"CUR_m": 3 * TIB, "BASE_m": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(elsewhere / "target"),
+            "--project-dir",
+            str(proj),
+            "--against",
+            "main",
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "m" in out
+    assert _worktree_count(tmp_path) == 1
+
+
+def test_project_dir_nonexistent_is_operational_error(tmp_path: Path, capsys):
+    target = write_target(tmp_path, make_manifest(make_node("m", compiled_code="CUR_m")))
+    code = main(
+        ["check", "--current", str(target), "--project-dir", str(tmp_path / "nope")],
+        runner=FakeDryRunner({}),
+    )
+    assert code == 2
+    assert "does not exist" in capsys.readouterr().err
