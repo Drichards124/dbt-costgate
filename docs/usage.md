@@ -286,12 +286,23 @@ fake it; it flags it.
 
 ## Accuracy notes
 
-- **Change detection catches SQL-body changes, not config- or macro-only ones.**
-  Both the `git diff` local default and the checksum diff (`--baseline` /
-  `--against`) select a model when its SQL body changes or it's newly added —
-  mirroring the common core of dbt's `state:modified`. A change that touches *only* a model's config (e.g.
-  `materialized`, `partition_by`) or *only* an upstream macro won't be picked up
-  automatically. Price those explicitly with `--select`, or pipe
+- **Change detection covers indirect changes, with one gap.** A model is selected
+  when its own SQL body changes or it's newly added, and also when a change it
+  doesn't own reaches it:
+  - With a baseline (`--baseline` / `--against`), when its **compiled SQL** differs
+    — which is what an upstream macro edit or a config change actually does. Such
+    a model is labelled in the report ("compiled SQL changed but the model file
+    didn't"), so it never appears unexplained.
+  - Locally (the `git diff` default, no baseline), when the change touches a
+    **macro** anywhere in its macro closure, or the **YAML file that patches it**
+    (its `schema.yml`).
+
+  The gap: a config change that does **not** alter the compiled SQL — `partition_by`,
+  `cluster_by` — is not detected with a baseline, because it does not change this
+  model's own scan either. It changes what *downstream* queries scan, which costgate
+  does not model. A change to `dbt_project.yml` is project-wide and can't be traced
+  to individual models from the diff alone; costgate says so on stderr and selects
+  nothing for it. Price either case explicitly with `--select`, or pipe
   `dbt ls --select state:modified` for dbt-authoritative selection.
 - **Dynamic filters** (`CURRENT_DATE()`, subquery predicates) make BigQuery
   dry-runs report a full-table scan. costgate flags these ("dry-run may be

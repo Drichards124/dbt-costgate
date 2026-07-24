@@ -15,8 +15,8 @@ so the pipeline is unit-tested end to end without a warehouse or credentials.
 |---|---|---|
 | `cli.py` | argparse `check`, wire the pipeline, own the exit codes | — |
 | `config.py` | load `.costgate.yml`, merge CLI overrides (CLI wins) | — |
-| `artifacts.py` | load manifest, filter to cost-bearing models, resolve compiled SQL, checksum-diff, basis + warning heuristics | — |
-| `gitdiff.py` | local selection via `git diff` (git only, no dbt) | git |
+| `artifacts.py` | load manifest, filter to cost-bearing models, resolve compiled SQL, change detection (body checksum, compiled SQL, macro/patch paths), basis + warning heuristics | — |
+| `gitdiff.py` | changed paths via `git diff` (git only, no dbt) | git |
 | `pricing.py` + `data/pricing.json` | region → $/TiB with disclosed source | — |
 | `bigquery.py` | `DryRunner` protocol + `BigQueryDryRunner` (ADC, retry) | network |
 | `estimate.py` | drive dry-runs, categorize errors, build priced deltas | — |
@@ -31,7 +31,7 @@ install the CLI, run it, post/update one sticky PR comment. No logic.
 
 ```
 compiled artifacts ──┐
-  --baseline (main)   ├─→ select changed (─select > checksum-diff > git-diff)
+  --baseline (main)   ├─→ select changed (─select > baseline-diff > git-diff)
   --current (target)  │         │  filter: resource_type=model, language=sql,
                       │         │          non-ephemeral
                       │         ▼

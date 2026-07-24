@@ -145,6 +145,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **One-command local diff** — `costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
 - [x] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
+- [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API

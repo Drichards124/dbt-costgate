@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeDryRunner, make_manifest, make_node, write_target
+from conftest import (
+    FakeDryRunner,
+    git,
+    init_repo,
+    make_macro,
+    make_manifest,
+    make_node,
+    write_target,
+)
 from costgate.cli import _resolve_baseline, _UsageError, main
 from costgate.config import BaselineTarget, Config
 from costgate.models import TIB, ErrorKind
@@ -326,3 +334,65 @@ def test_json_output_to_file(tmp_path: Path):
     assert code == 0
     payload = json.loads(out_file.read_text("utf-8"))
     assert payload["models"][0]["name"] == "fct"
+
+
+def test_compiled_sql_change_is_selected_and_explained(tmp_path: Path, capsys):
+    # Same model file (checksum unchanged), different compiled SQL — an upstream
+    # macro or config change. It must be gated, and the report must say why it's here.
+    baseline = write_target(
+        tmp_path / "base",
+        make_manifest(make_node("fct", checksum="same", compiled_code="BASE_fct")),
+    )
+    current = _target(tmp_path, make_node("fct", checksum="same", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"BASE_fct": TIB, "CUR_fct": 4 * TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(current),
+            "--baseline",
+            str(baseline / "manifest.json"),
+            "--max-usd-per-run",
+            "1.0",
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "fct" in out
+    assert "compiled SQL changed" in out
+
+
+def test_macro_change_selects_dependents_and_flags_project_config(tmp_path: Path, capsys):
+    repo = tmp_path
+    init_repo(repo)
+    (repo / "models").mkdir()
+    (repo / "macros").mkdir()
+    (repo / "models" / "fct.sql").write_text("select 1", "utf-8")
+    (repo / "macros" / "cents.sql").write_text("{% macro cents() %}{% endmacro %}", "utf-8")
+    (repo / "dbt_project.yml").write_text("name: p\n", "utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "init")
+    (repo / "macros" / "cents.sql").write_text("{% macro cents() %}1{% endmacro %}", "utf-8")
+    (repo / "dbt_project.yml").write_text("name: p\nmodels:\n  +materialized: table\n", "utf-8")
+
+    write_target(
+        repo,
+        make_manifest(
+            make_node(
+                "fct",
+                compiled_code="CUR_fct",
+                original_file_path="models/fct.sql",
+                depends_on_macros=["macro.pkg.cents"],
+            ),
+            make_node("other", compiled_code="CUR_other", original_file_path="models/other.sql"),
+            macros=(make_macro("cents", original_file_path="macros/cents.sql"),),
+        ),
+    )
+    runner = FakeDryRunner({"CUR_fct": TIB, "CUR_other": TIB})
+    code = main(["check", "--current", str(repo / "target")], runner=runner)
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "fct" in captured.out
+    assert "other" not in captured.out
+    assert "dbt_project.yml" in captured.err

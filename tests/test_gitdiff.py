@@ -1,25 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from conftest import git as _git
+from conftest import init_repo as _init_repo
 from conftest import make_manifest, make_node
 from costgate import artifacts, gitdiff
 from costgate.gitdiff import GitDiffError
 
 
-def _git(repo: Path, *args: str):
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
-
-
-def _init_repo(repo: Path):
-    _git(repo, "init", "-b", "main")
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "user.name", "t")
-
-
-def test_select_by_git_finds_changed_model(tmp_path: Path):
+def test_changed_paths_map_to_the_changed_model(tmp_path: Path):
     repo = tmp_path
     _init_repo(repo)
     (repo / "models").mkdir()
@@ -37,7 +28,8 @@ def test_select_by_git_finds_changed_model(tmp_path: Path):
             make_node("b", original_file_path="models/b.sql"),
         )
     )
-    changed = {nodes[uid].name for uid in gitdiff.select_by_git(nodes, repo, "main")}
+    paths = gitdiff.changed_paths(repo, "main")
+    changed = {nodes[uid].name for uid in artifacts.select_by_paths(nodes, paths)}
     assert changed == {"a"}
 
 

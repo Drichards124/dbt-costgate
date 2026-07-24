@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_manifest, make_node, write_target
+from conftest import make_macro, make_manifest, make_node, write_target
 from costgate import artifacts
 from costgate.artifacts import ArtifactError
 from costgate.models import EstimateBasis
@@ -144,3 +144,99 @@ def test_select_changed_always_selects_a_declared_rename():
     renames = {"model.pkg.day": "model.pkg.mon"}
     changed = {current[uid].name for uid in artifacts.select_changed(baseline, current, renames)}
     assert changed == {"day"}
+
+
+def test_select_changed_detects_a_compiled_sql_change_with_an_unchanged_body():
+    # An upstream macro (or a config change) rewrites the compiled SQL while the
+    # model's own .sql file — and therefore its checksum — is untouched.
+    baseline = artifacts.model_nodes(
+        make_manifest(make_node("fct", checksum="same", compiled_code="select a from t"))
+    )
+    current = artifacts.model_nodes(
+        make_manifest(make_node("fct", checksum="same", compiled_code="select a, b from t"))
+    )
+    assert artifacts.select_changed(baseline, current) == ["model.pkg.fct"]
+
+
+def test_select_changed_ignores_compiled_sql_when_either_side_is_missing():
+    # A parse-only manifest has no compiled_code; that must not select the project.
+    baseline = artifacts.model_nodes(
+        make_manifest(make_node("fct", checksum="same", compiled_code="select 1"))
+    )
+    uid, raw = make_node("fct", checksum="same")
+    raw["compiled_code"] = None  # a `dbt parse` manifest carries no compiled SQL
+    current = artifacts.model_nodes(make_manifest((uid, raw)))
+    assert artifacts.select_changed(baseline, current) == []
+    assert artifacts.indirect_changes(baseline, current) == set()
+
+
+def test_indirect_changes_names_only_the_body_unchanged_models():
+    baseline = artifacts.model_nodes(
+        make_manifest(
+            make_node("body", checksum="old", compiled_code="select 1"),
+            make_node("macro_only", checksum="same", compiled_code="select 1"),
+            make_node("untouched", checksum="same", compiled_code="select 1"),
+        )
+    )
+    current = artifacts.model_nodes(
+        make_manifest(
+            make_node("body", checksum="new", compiled_code="select 2"),
+            make_node("macro_only", checksum="same", compiled_code="select 2"),
+            make_node("untouched", checksum="same", compiled_code="select 1"),
+        )
+    )
+    assert artifacts.indirect_changes(baseline, current) == {"model.pkg.macro_only"}
+
+
+def test_select_by_paths_matches_model_file_patch_file_and_macro():
+    manifest = make_manifest(
+        make_node("by_sql", original_file_path="models/by_sql.sql"),
+        make_node("by_yml", patch_path="pkg://models/schema.yml"),
+        make_node("by_macro", depends_on_macros=["macro.pkg.cents"]),
+        make_node("untouched"),
+        macros=(make_macro("cents", original_file_path="macros/cents.sql"),),
+    )
+    nodes = artifacts.model_nodes(manifest)
+    selected = artifacts.select_by_paths(
+        nodes,
+        ["models/by_sql.sql", "models/schema.yml", "macros/cents.sql"],
+        artifacts.macro_index(manifest),
+    )
+    assert {nodes[uid].name for uid in selected} == {"by_sql", "by_yml", "by_macro"}
+
+
+def test_select_by_paths_follows_a_macro_chain():
+    # dbt treats a macro that calls a changed macro as changed too; so must we.
+    manifest = make_manifest(
+        make_node("fct", depends_on_macros=["macro.pkg.outer"]),
+        macros=(
+            make_macro("outer", depends_on_macros=["macro.pkg.inner"]),
+            make_macro("inner", original_file_path="macros/inner.sql"),
+        ),
+    )
+    nodes = artifacts.model_nodes(manifest)
+    selected = artifacts.select_by_paths(
+        nodes, ["macros/inner.sql"], artifacts.macro_index(manifest)
+    )
+    assert selected == ["model.pkg.fct"]
+
+
+def test_select_by_paths_ignores_an_unrelated_macro():
+    manifest = make_manifest(
+        make_node("fct", depends_on_macros=["macro.pkg.used"]),
+        macros=(
+            make_macro("used", original_file_path="macros/used.sql"),
+            make_macro("unused", original_file_path="macros/unused.sql"),
+        ),
+    )
+    nodes = artifacts.model_nodes(manifest)
+    assert (
+        artifacts.select_by_paths(nodes, ["macros/unused.sql"], artifacts.macro_index(manifest))
+        == []
+    )
+
+
+def test_touches_project_config_spots_dbt_project_yml_anywhere():
+    assert artifacts.touches_project_config(["dbt_project.yml"])
+    assert artifacts.touches_project_config(["analytics/dbt_project.yml"])
+    assert not artifacts.touches_project_config(["models/dbt_project_notes.md"])
