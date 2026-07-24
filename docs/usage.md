@@ -82,6 +82,70 @@ the built table, not the current main branch's compiled SQL).
   their incremental form; costgate flags that as a basis mismatch rather than
   mis-diffing.
 
+## GitHub Action
+
+Wrap `costgate check` in a pull-request gate with one step. The Action installs
+costgate, runs the check, and posts a single **sticky** comment with the cost
+report — updated in place on every push, never stacked.
+
+```yaml
+# .github/workflows/costgate.yml
+name: costgate
+on: pull_request
+
+# pull-requests: write lets the Action post the sticky comment on same-repo PRs.
+# Fork PRs get a read-only token and degrade to "no comment" — never a failed
+# check. id-token: write is for keyless Workload Identity Federation (below).
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+concurrency: # one run per PR — avoids two pushes racing to double-post
+  group: costgate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  costgate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Your dbt setup + keyless auth to BigQuery (google-github-actions/auth).
+      - run: pip install dbt-bigquery
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # Compile the PR branch, and fetch the baseline (main, compiled the same
+      # way — see "Getting the baseline" above).
+      - run: dbt compile
+      # - run: <download your baseline manifest.json to baseline/manifest.json>
+
+      - uses: Drichards124/costgate@v0.2.0
+        with:
+          baseline: baseline/manifest.json
+          fail-on: fail # optional; unset defers to .costgate.yml
+```
+
+The Action needs a Python environment (your dbt setup provides one) and compiled
+dbt artifacts. It runs `check --format markdown`; every `check` flag is an input
+(`baseline`, `config`, `select`, `base`, `fail-on`, `max-usd-per-run`, `max-pct`,
+`max-usd-per-month`, `region`, `usd-per-tib`, `project`, `threads`), plus:
+
+| Input | Default | Purpose |
+|---|---|---|
+| `comment` | `true` | Post/update the sticky PR comment. |
+| `fail-on-operational` | `false` | Fail the job on an operational error (exit 2). Default is alert-only. |
+| `github-token` | `${{ github.token }}` | Token for the comment (needs `pull-requests: write`). |
+
+Outputs: `exit-code` (0/1/2) and `status` (`ok`/`failed`/`error`). The exact
+PASS/WARN/FAIL verdict is in the comment body.
+
 ## Incremental models
 
 Incrementals are first-class. Compiled in a fresh target, `is_incremental()` is

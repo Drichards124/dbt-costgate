@@ -26,9 +26,9 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 </div>
 
 > [!NOTE]
-> **Working MVP.** `costgate check` is implemented and tested. The PR-comment
-> image below is still an illustrative mock (the GitHub Action wrapper is the next
-> step); the terminal output further down is **real** costgate output. See the
+> **Working MVP.** `costgate check` and the **GitHub Action** are implemented and
+> tested. The PR-comment image below is an illustrative mock of the comment's
+> design; the terminal output further down is **real** costgate output. See the
 > [usage guide](docs/usage.md) and [changelog](CHANGELOG.md).
 
 ---
@@ -140,7 +140,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 
 - [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [ ] **One-command local diff** — `costgate check --against main` (isolated git worktree)
-- [ ] **GitHub Action** wrapper with a sticky PR comment
+- [x] **GitHub Action** wrapper with a sticky PR comment
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API

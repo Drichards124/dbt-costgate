@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: Apache-2.0
+name: costgate
+description: Dry-run changed dbt models on a PR, price the diff, and post a sticky BigQuery cost comment.
+author: Dashan Richards
+branding:
+  icon: dollar-sign
+  color: green
+
+# --- Input ↔ `costgate check` flag map (CLAUDE.md §6 — keep in sync with cli.py) ---
+#   current→--current  baseline→--baseline  config→--config  select→--select
+#   base→--base  fail-on→--fail-on  max-usd-per-run→--max-usd-per-run
+#   max-pct→--max-pct  max-usd-per-month→--max-usd-per-month  region→--region
+#   usd-per-tib→--usd-per-tib  project→--project  threads→--threads
+# Deliberately NOT exposed (CLAUDE.md §7 completeness — silence ≠ coverage):
+#   the `config` subcommand, and `--format {terminal,json}`. The Action always
+#   runs `check --format markdown`; every other input defaults empty so the
+#   caller's `.costgate.yml` stays authoritative.
+inputs:
+  current:
+    description: Compiled dbt target dir or manifest.json for this PR.
+    default: target
+  baseline:
+    description: Baseline (main, compiled the same way) manifest.json for a before/after diff.
+    default: ""
+  config:
+    description: Path to a costgate config file (default .costgate.yml).
+    default: ""
+  select:
+    description: Comma-separated model names to estimate (overrides change detection).
+    default: ""
+  base:
+    description: Git ref to diff against for local selection (default main).
+    default: ""
+  fail-on:
+    description: Gate strictness — never | warn | fail. Empty defers to .costgate.yml.
+    default: ""
+  max-usd-per-run:
+    description: Fail if the per-run cost increase exceeds this many USD.
+    default: ""
+  max-pct:
+    description: Fail if the percentage cost increase exceeds this.
+    default: ""
+  max-usd-per-month:
+    description: Fail if the per-month cost increase exceeds this many USD.
+    default: ""
+  region:
+    description: Force a pricing region (default auto-detect).
+    default: ""
+  usd-per-tib:
+    description: Override the on-demand rate (USD per TiB).
+    default: ""
+  project:
+    description: BigQuery project for dry-run jobs (default ADC).
+    default: ""
+  threads:
+    description: Parallel dry-runs.
+    default: ""
+  comment:
+    description: Post/update a sticky PR comment with the report.
+    default: "true"
+  fail-on-operational:
+    description: Fail the job on an operational error (exit 2). Default is alert-only.
+    default: "false"
+  github-token:
+    description: Token used to post the PR comment (needs pull-requests write on same-repo PRs).
+    default: ${{ github.token }}
+
+outputs:
+  exit-code:
+    description: "costgate exit code: 0 pass, 1 gate failed, 2 operational error."
+    value: ${{ steps.costgate.outputs.exit-code }}
+  status:
+    description: "Exit-class: ok (0) | failed (1) | error (2). Not the PASS/WARN/FAIL verdict — that is in the comment body."
+    value: ${{ steps.costgate.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run costgate and upsert the sticky cost comment
+      id: costgate
+      shell: bash
+      env:
+        CURRENT: ${{ inputs.current }}
+        BASELINE: ${{ inputs.baseline }}
+        CONFIG: ${{ inputs.config }}
+        SELECT: ${{ inputs.select }}
+        BASE: ${{ inputs.base }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        MAX_USD_PER_RUN: ${{ inputs.max-usd-per-run }}
+        MAX_PCT: ${{ inputs.max-pct }}
+        MAX_USD_PER_MONTH: ${{ inputs.max-usd-per-month }}
+        REGION: ${{ inputs.region }}
+        USD_PER_TIB: ${{ inputs.usd-per-tib }}
+        PROJECT: ${{ inputs.project }}
+        THREADS: ${{ inputs.threads }}
+        COMMENT: ${{ inputs.comment }}
+        FAIL_ON_OPERATIONAL: ${{ inputs.fail-on-operational }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        ACTION_PATH: ${{ github.action_path }}
+        MARKER: "<!-- costgate-sticky -->"
+      run: |
+        set -eo pipefail
+
+        # 1. Install costgate from THIS action's pinned source — the exact commit
+        #    the caller referenced with `uses:`. No PyPI, and no CLI/action drift.
+        if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+        "$PY" -m pip install --quiet "$ACTION_PATH"
+
+        # 2. Build the argv, adding each optional flag only when its input is set,
+        #    so an empty input never becomes an empty-string flag and .costgate.yml
+        #    stays authoritative. Inputs arrive via env — no GitHub expressions,
+        #    and so no injection, in the script body.
+        REPORT="$RUNNER_TEMP/costgate-report.md"
+        args=(check --format markdown --output "$REPORT" --current "$CURRENT")
+        [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
+        [ -n "$CONFIG" ] && args+=(--config "$CONFIG")
+        [ -n "$SELECT" ] && args+=(--select "$SELECT")
+        [ -n "$BASE" ] && args+=(--base "$BASE")
+        [ -n "$FAIL_ON" ] && args+=(--fail-on "$FAIL_ON")
+        [ -n "$MAX_USD_PER_RUN" ] && args+=(--max-usd-per-run "$MAX_USD_PER_RUN")
+        [ -n "$MAX_PCT" ] && args+=(--max-pct "$MAX_PCT")
+        [ -n "$MAX_USD_PER_MONTH" ] && args+=(--max-usd-per-month "$MAX_USD_PER_MONTH")
+        [ -n "$REGION" ] && args+=(--region "$REGION")
+        [ -n "$USD_PER_TIB" ] && args+=(--usd-per-tib "$USD_PER_TIB")
+        [ -n "$PROJECT" ] && args+=(--project "$PROJECT")
+        [ -n "$THREADS" ] && args+=(--threads "$THREADS")
+
+        # 3. Run. A nonzero gate/operational code must NOT abort the step before we
+        #    comment, so capture it. Never pipe costgate's output (pipefail).
+        code=0
+        costgate "${args[@]}" || code=$?
+        echo "costgate exited $code"
+        echo "exit-code=$code" >>"$GITHUB_OUTPUT"
+        case "$code" in
+          0) status=ok ;;
+          1) status=failed ;;
+          *) status=error ;;
+        esac
+        echo "status=$status" >>"$GITHUB_OUTPUT"
+
+        # 4. On an operational error costgate returns before writing the report, so
+        #    synthesize a short marked body. Upserting it also overwrites any stale
+        #    passing report from an earlier commit that this one did not re-evaluate.
+        if [ "$code" -ge 2 ] && [ ! -f "$REPORT" ]; then
+          REPORT="$RUNNER_TEMP/costgate-error.md"
+          {
+            printf '%s\n\n' "$MARKER"
+            printf '### ⚠️ costgate could not run\n\n'
+            printf 'An operational error (exit %s) — e.g. missing GCP credentials or an ' "$code"
+            printf 'uncompiled manifest — prevented the cost check. See the Action run logs. '
+            printf 'This gate is alert-only for this run.\n'
+          } >"$REPORT"
+          echo "::warning::costgate could not run (exit $code); see logs."
+        fi
+
+        # 5. Upsert the sticky — only on same-repo pull requests. Fork PRs and
+        #    non-PR events have no writable token; skip with a notice rather than
+        #    failing. A comment failure is never fatal to the gate.
+        if [ "$COMMENT" = "true" ]; then
+          if [ -n "$PR_NUMBER" ] && [ "$IS_FORK" != "true" ]; then
+            if ! bash "$ACTION_PATH/scripts/sticky_comment.sh" "$PR_NUMBER" "$MARKER" "$REPORT"; then
+              echo "::warning::costgate could not post the PR comment (continuing)."
+            fi
+          else
+            echo "::warning::Skipping costgate PR comment: read-only token on a fork PR or a non-PR event."
+          fi
+        fi
+
+        # 6. Propagate costgate's verdict as the job's fate: gate failure blocks;
+        #    an operational error is alert-only unless fail-on-operational is set.
+        if [ "$code" -eq 1 ]; then
+          exit 1
+        fi
+        if [ "$code" -ge 2 ]; then
+          [ "$FAIL_ON_OPERATIONAL" = "true" ] && exit "$code"
+          exit 0
+        fi
+        exit 0

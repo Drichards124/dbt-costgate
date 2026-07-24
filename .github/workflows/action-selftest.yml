@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Action self-test
+
+# Exercises action.yml end to end without BigQuery or the real GitHub API: a
+# shimmed `costgate` drives each exit code (writing no report on exit 2, as the
+# real CLI does) and a shimmed `gh` records the comment calls. Verifies the parts
+# unit tests can't reach — input plumbing, exit-code propagation, and the
+# synthesized-body path — while tests/test_sticky_comment.py covers the upsert.
+on:
+  pull_request:
+    branches: [ple, main]
+    paths:
+      - action.yml
+      - scripts/**
+      - .github/selftest/**
+      - .github/workflows/action-selftest.yml
+  push:
+    branches-ignore: [main, ple]
+    paths:
+      - action.yml
+      - scripts/**
+      - .github/selftest/**
+      - .github/workflows/action-selftest.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Put the test doubles ahead of everything on PATH
+        run: |
+          chmod +x "$GITHUB_WORKSPACE/.github/selftest/costgate" "$GITHUB_WORKSPACE/.github/selftest/gh"
+          echo "$GITHUB_WORKSPACE/.github/selftest" >>"$GITHUB_PATH"
+
+      # --- Case A: pass, no existing sticky → POST, step succeeds ---
+      - name: Case A — pass
+        id: case_a
+        uses: ./
+        env:
+          SHIM_EXIT: "0"
+          FAKE_GH_IDS: ""
+          FAKE_GH_LOG: ${{ runner.temp }}/a.log
+        with:
+          comment: "true"
+      - name: Assert A outputs
+        run: |
+          [ "${{ steps.case_a.outputs.status }}" = "ok" ] || { echo "A: status != ok"; exit 1; }
+          [ "${{ steps.case_a.outputs.exit-code }}" = "0" ] || { echo "A: exit-code != 0"; exit 1; }
+      - name: Assert A comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        run: |
+          grep -qE '^POST[[:space:]].*marker=yes' "${{ runner.temp }}/a.log" \
+            || { echo "A: expected a POST carrying the marker"; cat "${{ runner.temp }}/a.log" 2>/dev/null; exit 1; }
+
+      # --- Case B: gate failed (exit 1), existing sticky → PATCH, step fails ---
+      - name: Case B — gate fail
+        id: case_b
+        continue-on-error: true
+        uses: ./
+        env:
+          SHIM_EXIT: "1"
+          FAKE_GH_IDS: "777"
+          FAKE_GH_LOG: ${{ runner.temp }}/b.log
+        with:
+          comment: "true"
+      - name: Assert B outputs
+        run: |
+          [ "${{ steps.case_b.outcome }}" = "failure" ] || { echo "B: expected step failure"; exit 1; }
+          [ "${{ steps.case_b.outputs.status }}" = "failed" ] || { echo "B: status != failed"; exit 1; }
+          [ "${{ steps.case_b.outputs.exit-code }}" = "1" ] || { echo "B: exit-code != 1"; exit 1; }
+      - name: Assert B comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        run: |
+          grep -qE '^PATCH[[:space:]]repos/.*/issues/comments/777' "${{ runner.temp }}/b.log" \
+            || { echo "B: expected a PATCH of comment 777"; cat "${{ runner.temp }}/b.log" 2>/dev/null; exit 1; }
+
+      # --- Case C: operational (exit 2), alert-only → synthesized body, step passes ---
+      - name: Case C — operational, alert-only
+        id: case_c
+        uses: ./
+        env:
+          SHIM_EXIT: "2"
+          FAKE_GH_IDS: ""
+          FAKE_GH_LOG: ${{ runner.temp }}/c.log
+        with:
+          comment: "true"
+          fail-on-operational: "false"
+      - name: Assert C outputs
+        run: |
+          [ "${{ steps.case_c.outcome }}" = "success" ] || { echo "C: expected step success (alert-only)"; exit 1; }
+          [ "${{ steps.case_c.outputs.status }}" = "error" ] || { echo "C: status != error"; exit 1; }
+          [ "${{ steps.case_c.outputs.exit-code }}" = "2" ] || { echo "C: exit-code != 2"; exit 1; }
+      - name: Assert C comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        run: |
+          grep -qE '^POST[[:space:]].*marker=yes' "${{ runner.temp }}/c.log" \
+            || { echo "C: expected a synthesized POST carrying the marker"; cat "${{ runner.temp }}/c.log" 2>/dev/null; exit 1; }
+
+      # --- Case D: operational (exit 2), fail-on-operational → step fails ---
+      - name: Case D — operational, hard-fail
+        id: case_d
+        continue-on-error: true
+        uses: ./
+        env:
+          SHIM_EXIT: "2"
+          FAKE_GH_LOG: ${{ runner.temp }}/d.log
+        with:
+          comment: "false"
+          fail-on-operational: "true"
+      - name: Assert D outputs
+        run: |
+          [ "${{ steps.case_d.outcome }}" = "failure" ] || { echo "D: expected step failure"; exit 1; }
+          [ "${{ steps.case_d.outputs.exit-code }}" = "2" ] || { echo "D: exit-code != 2"; exit 1; }
