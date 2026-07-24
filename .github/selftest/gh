@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test double for the gh CLI — used ONLY by action-selftest.yml. The list call
+# (recognised by --jq) prints $FAKE_GH_IDS; a POST/PATCH appends one tab-separated
+# line (method, URL, whether the body carried the sticky marker) to $FAKE_GH_LOG.
+# No network, no token.
+method=""
+url=""
+body=""
+is_list=0
+args=("$@")
+i=0
+while [ $i -lt ${#args[@]} ]; do
+  a="${args[$i]}"
+  case "$a" in
+    --jq) is_list=1 ;;
+    --method)
+      i=$((i + 1))
+      method="${args[$i]}"
+      ;;
+    -F)
+      i=$((i + 1))
+      f="${args[$i]}"
+      case "$f" in body=@*) body="${f#body=@}" ;; esac
+      ;;
+    repos/*) url="$a" ;;
+  esac
+  i=$((i + 1))
+done
+if [ "$is_list" = "1" ]; then
+  [ -n "${FAKE_GH_IDS:-}" ] && printf '%s\n' "$FAKE_GH_IDS"
+  exit 0
+fi
+marker=no
+if [ -n "$body" ] && [ -f "$body" ]; then
+  grep -qF '<!-- costgate-sticky -->' "$body" && marker=yes
+fi
+printf '%s\t%s\tmarker=%s\n' "$method" "$url" "$marker" >>"${FAKE_GH_LOG:-/dev/null}"
+exit 0
