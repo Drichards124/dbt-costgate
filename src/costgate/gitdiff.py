@@ -50,8 +50,9 @@ def _resolve_base(git: _Git, base: str | None) -> str:
 
 
 def changed_paths(project_dir: Path, base: str | None = None) -> list[str]:
-    """Repo-relative paths changed between the merge-base of `base` and the
-    working tree (committed + uncommitted)."""
+    """Paths changed between the merge-base of `base` and the working tree
+    (committed + uncommitted), relative to `project_dir` — the same basis a dbt
+    manifest uses, so they can be matched against it directly."""
     git = _Git(project_dir)
     if not (project_dir / ".git").exists():
         # Could still be a subdir of a repo; let git decide, but give a clear error.
@@ -66,5 +67,9 @@ def changed_paths(project_dir: Path, base: str | None = None) -> list[str]:
         merge_base = git.run("merge-base", "HEAD", ref).strip()
     except GitDiffError:
         merge_base = ref
-    out = git.run("diff", "--name-only", merge_base)
+    # --relative reports paths relative to project_dir rather than the repo root,
+    # which is the basis a manifest's original_file_path uses. Without it, a dbt
+    # project in a subdirectory matches nothing at all. It also drops changes
+    # outside the project, which belong to a sibling project, not this one.
+    out = git.run("diff", "--name-only", "--relative", merge_base)
     return [line.strip() for line in out.splitlines() if line.strip()]
