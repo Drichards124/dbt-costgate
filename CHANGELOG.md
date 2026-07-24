@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline (`current: baseline`, by model name or `unique_id`) so costgate diffs
   across a model rename instead of reporting the model as new. Requires a
   baseline; a bad mapping fails the run with an actionable error.
+- **Named baselines** — a `baselines:` map in `.costgate.yml` (each entry a
+  `manifest:` path or an `against:` git ref) plus `default_baseline`, selected with
+  `--baseline-target <name>` (and the Action's `baseline-target` input). Set a
+  default once and `costgate check` diffs without a baseline flag; switch
+  environments (main / ple / prod) by name.
+
+### Docs
+
+- New "Audit / monitor-only" guide — track cost without ever blocking a deploy
+  (`fail_on: never`, no thresholds, or `--format json` for a record).
 
 ## [0.4.0] - 2026-07-24
 
