@@ -8,8 +8,20 @@ body it was handed. No network, no GitHub token — just the upsert branching.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
+# sticky_comment.sh is a bash script that only ever runs on the action's Linux
+# runner (action.yml uses `shell: bash`). It is not meaningful on Windows, whose
+# bash lacks the POSIX PATH these tests build.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("bash") is None,
+    reason="sticky_comment.sh targets POSIX CI runners; bash unavailable here",
+)
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sticky_comment.sh"
 MARKER = "<!-- costgate-sticky -->"
