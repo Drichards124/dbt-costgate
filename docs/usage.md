@@ -246,7 +246,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/costgate@v0.4.0
+      - uses: Drichards124/costgate@v0.5.0
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .costgate.yml
@@ -340,6 +340,14 @@ fail_on: fail                   # never | warn | fail
 
 CLI flags (`--region`, `--usd-per-tib`, `--max-usd-per-run`, `--fail-on`, …)
 override the file.
+
+**The same config applies locally and in CI.** There is one `costgate check` — the
+GitHub Action just runs it — and both read the same committed `.costgate.yml`
+(auto-discovered from your project directory). So thresholds, `renames`,
+`baselines`, `exclude`/`warn_only`, and `fail_on` behave identically on your
+machine and in a PR run; commit the file and there is nothing CI-specific to wire
+up. The one thing that doesn't travel automatically is a **CLI flag** — to set one
+in CI, use the matching Action input.
 
 For the full, always-current list of keys — type, default, and what each does —
 run `costgate config` (add `--format json` for a machine-readable version).
