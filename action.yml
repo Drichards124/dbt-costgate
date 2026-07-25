@@ -13,6 +13,7 @@ branding:
 #   max-usd-per-run→--max-usd-per-run  max-pct→--max-pct
 #   max-usd-per-month→--max-usd-per-month  max-usd-total→--max-usd-total
 #   max-tib-total→--max-tib-total  region→--region  usd-per-tib→--usd-per-tib
+#   currency→--currency
 #   project→--project  threads→--threads
 # Deliberately NOT exposed (CLAUDE.md §7 completeness — silence ≠ coverage):
 #   the `config` subcommand; `--format {terminal,json}` (the Action always runs
@@ -66,6 +67,11 @@ inputs:
   usd-per-tib:
     description: Override the on-demand rate (USD per TiB).
     default: ""
+  currency:
+    description: >-
+      ISO 4217 code to label amounts with (default USD). Labels a rate you
+      supplied yourself; dbt-costgate never converts currencies.
+    default: ""
   project:
     description: BigQuery project for dry-run jobs (default ADC).
     default: ""
@@ -112,6 +118,7 @@ runs:
         MAX_TIB_TOTAL: ${{ inputs.max-tib-total }}
         REGION: ${{ inputs.region }}
         USD_PER_TIB: ${{ inputs.usd-per-tib }}
+        CURRENCY: ${{ inputs.currency }}
         PROJECT: ${{ inputs.project }}
         THREADS: ${{ inputs.threads }}
         COMMENT: ${{ inputs.comment }}
@@ -149,6 +156,7 @@ runs:
         [ -n "$MAX_TIB_TOTAL" ] && args+=(--max-tib-total "$MAX_TIB_TOTAL")
         [ -n "$REGION" ] && args+=(--region "$REGION")
         [ -n "$USD_PER_TIB" ] && args+=(--usd-per-tib "$USD_PER_TIB")
+        [ -n "$CURRENCY" ] && args+=(--currency "$CURRENCY")
         [ -n "$PROJECT" ] && args+=(--project "$PROJECT")
         [ -n "$THREADS" ] && args+=(--threads "$THREADS")
 

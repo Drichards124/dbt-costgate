@@ -133,6 +133,7 @@ def test_every_documented_key_is_honored_by_the_parser(tmp_path: Path):
 pricing:
   region: europe-west3
   usd_per_tib: 5.0
+  currency: EUR
   regions:
     US: 6.0
 thresholds:
@@ -165,3 +166,20 @@ fail_on: warn
     for entry in CONFIG_REFERENCE:
         # each documented key's value actually landed — proving key ↔ parser match
         assert _get(cfg, entry.attr) != entry.default, entry.key
+
+
+def test_currency_is_parsed_and_upper_cased(tmp_path: Path):
+    (tmp_path / ".dbt-costgate.yml").write_text("pricing:\n  currency: eur\n", "utf-8")
+    assert Config.load(None, tmp_path).currency == "EUR"
+
+
+def test_currency_absent_is_none_so_the_table_default_applies(tmp_path: Path):
+    (tmp_path / ".dbt-costgate.yml").write_text("pricing:\n  region: US\n", "utf-8")
+    assert Config.load(None, tmp_path).currency is None
+
+
+@pytest.mark.parametrize("bad", ["$", "Euro", "US", "USDD", ""])
+def test_a_currency_that_is_not_an_iso_code_is_rejected(tmp_path: Path, bad: str):
+    (tmp_path / ".dbt-costgate.yml").write_text(f'pricing:\n  currency: "{bad}"\n', "utf-8")
+    with pytest.raises(ValueError, match="ISO 4217"):
+        Config.load(None, tmp_path)

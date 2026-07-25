@@ -175,11 +175,23 @@ class PricingDisclosure:
     """The provenance line every report carries — region, rate, and where the
     rate came from — so a dollar figure is never an unattributed assertion."""
 
-    regions: dict[str, float]  # region -> usd_per_tib actually applied
+    regions: dict[str, float]  # region -> rate per TiB actually applied
     source: str  # e.g. "built-in table v2026.07" / "user override" / "default fallback"
     table_version: str
     last_verified: str
     region_sources: dict[str, str] = field(default_factory=dict)  # region -> rate source
+    currency: str = "USD"  # ISO 4217 code the applied rates are denominated in
+
+    @property
+    def priced(self) -> bool:
+        """Whether money figures carry any information.
+
+        Every applied rate being 0 is a valid, documented configuration for
+        capacity/flat-rate slots, where there is no per-byte price to report. In
+        that state a currency column is a column of zeroes, so reports drop money
+        entirely and show scanned bytes instead.
+        """
+        return any(rate != 0 for rate in self.regions.values())
 
 
 @dataclass
