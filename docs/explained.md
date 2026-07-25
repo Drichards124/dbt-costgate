@@ -254,6 +254,10 @@ misread — and gate on the two thresholds that need no rate at all:
 `max_tib_total` and `max_pct_increase`. A percentage has no currency, so it works
 regardless of how you pay.
 
+If you leave a **dollar** threshold configured at a rate of `0.00`, it can never
+fire — every cost is `0.00`, so nothing exceeds anything. The report warns you
+and names the setting, but does not block: it is your call whether to change it.
+
 Worked examples of all three, generated from the real code, are in
 [usage.md](usage.md#what-the-report-looks-like-in-your-setup).
 
@@ -451,14 +455,19 @@ It changes what *downstream* queries scan, which this tool does not model.
 > queries other people will run against it later. Worth knowing that a clustering
 > change reviewed here as "no cost impact" may still be significant downstream.
 
-**Bundled rates are best-effort.** Every rate carries a `last_verified` date and
-every report names its source. A location that is not in the table falls back to a
-default and says so, rather than quietly guessing.
+**Bundled rates are best-effort, and a fallback under-reports.** Every rate
+carries a `last_verified` date and every report names its source. A location that
+is not in the table — one Google opened after the table was cut — falls back to
+the default rate. That default is the *lowest* rate BigQuery charges anywhere, so
+a fallback figure is likely too low, which is the wrong direction for a gate.
 
-> **What to do:** if your rate differs from list price — negotiated, Editions, or
-> a location that is falling back — set it with `pricing.usd_per_tib` or
-> `pricing.regions`. Your override always wins over the table, so updating the
-> bundled rates can never overwrite the price you actually pay. Adding a verified
+> **What to do:** the report warns when this happens and names the location, so
+> it is never silent. Set the rate you actually pay with `pricing.regions` for
+> that one location, `pricing.usd_per_tib` for a flat rate everywhere, or
+> `pricing.region` to pin pricing to a location you do have a rate for. The same
+> applies if your rate differs from list price for any other reason — negotiated
+> or Editions. Your value always wins over the table, so updating the bundled
+> rates can never overwrite the price you actually pay. Adding a verified
 > location to the table is a one-line pull request.
 
 ---

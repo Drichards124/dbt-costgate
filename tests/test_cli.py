@@ -14,6 +14,7 @@ from conftest import (
     make_node,
     write_target,
 )
+from dbt_costgate.bigquery import DryRunResult
 from dbt_costgate.cli import _resolve_baseline, _UsageError, main
 from dbt_costgate.config import BaselineTarget, Config
 from dbt_costgate.models import TIB, ErrorKind
@@ -398,3 +399,77 @@ def test_macro_change_selects_dependents_and_flags_project_config(tmp_path: Path
     assert "fct" in captured.out
     assert "other" not in captured.out
     assert "dbt_project.yml" in captured.err
+
+
+# --- advisory notices, end to end -------------------------------------------
+
+
+def test_dead_dollar_threshold_at_zero_rate_warns_without_blocking(tmp_path: Path, capsys):
+    """The gate must still pass. The whole point of the notice is that it informs
+    rather than overrides: pricing at 0 and keeping a dollar cap is the user's
+    call, so this may never turn a passing run into a failing one."""
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--select",
+            "fct",
+            "--usd-per-tib",
+            "0",
+            "--max-usd-total",
+            "1.0",
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "GATE: PASS" in out
+    assert "thresholds.max_usd_total cannot fire" in out
+
+
+def test_unknown_region_warns_and_says_which_way_it_errs(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": DryRunResult(total_bytes=TIB, location="mars-central1")})
+    code = main(["check", "--current", str(target), "--select", "fct"], runner=runner)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "No verified rate for mars-central1" in out
+    assert "understated" in out
+
+
+def test_notices_reach_the_json_payload(tmp_path: Path):
+    out_file = tmp_path / "report.json"
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": DryRunResult(total_bytes=TIB, location="mars-central1")})
+    main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--select",
+            "fct",
+            "--format",
+            "json",
+            "--output",
+            str(out_file),
+        ],
+        runner=runner,
+    )
+    payload = json.loads(out_file.read_text("utf-8"))
+    assert any("mars-central1" in n for n in payload["notices"])
+    assert payload["verdict"]["exit_code"] == 0
+
+
+def test_no_notices_on_an_ordinary_priced_run(tmp_path: Path, capsys):
+    """A clean configuration must stay quiet — a warning that appears on every
+    run is a warning nobody reads."""
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": TIB})
+    main(
+        ["check", "--current", str(target), "--select", "fct", "--max-usd-total", "100"],
+        runner=runner,
+    )
+    assert "⚠" not in capsys.readouterr().out

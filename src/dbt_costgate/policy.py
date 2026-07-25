@@ -36,6 +36,43 @@ def evaluate(deltas: list[CostDelta], config: Config, currency: str = "USD") -> 
     return Verdict(status=Status.FAIL, breaches=breaches, exit_code=EXIT_GATE_FAILED)
 
 
+# Money thresholds, in declaration order. Each compares against a figure derived
+# from a rate, so all of them are inert once that rate is 0.
+_MONEY_THRESHOLDS = (
+    "max_usd_increase_per_run",
+    "max_usd_increase_per_month",
+    "max_usd_total",
+)
+
+
+def unpriced_threshold_notice(thr: Thresholds, priced: bool) -> str | None:
+    """Warn when a money threshold is configured but cannot possibly fire.
+
+    Setting the rate to 0 is the documented way to run on capacity/slots, where
+    no per-byte price exists. It also silently makes every dollar threshold
+    inert: the figures they compare against are all 0.00, so nothing exceeds
+    anything and the gate passes while looking configured. That is the same
+    shape as the bug where a 0 rate disabled the percentage threshold — a gate
+    that reports success because it has nothing to measure.
+
+    Advisory only. A team that has decided to price at 0 and leave the dollar
+    thresholds in place is not doing anything invalid, so this never blocks;
+    it only refuses to let the situation go unstated.
+    """
+    if priced:
+        return None
+    dead = [k for k in _MONEY_THRESHOLDS if getattr(thr, k) is not None]
+    if not dead:
+        return None
+    keys = ", ".join(f"thresholds.{k}" for k in dead)
+    return (
+        f"{keys} cannot fire: no per-byte price is configured, so every cost on this run is 0.00 "
+        f"and no dollar figure can exceed a limit. Gate on scanned bytes instead with "
+        f"thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — this "
+        f"does not affect the gate or the exit code."
+    )
+
+
 def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[str]:
     out: list[str] = []
     cur = currency

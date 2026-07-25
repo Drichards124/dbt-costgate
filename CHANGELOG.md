@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reports now warn when a threshold cannot fire.** Setting the rate to `0.00`
+  is the documented way to run on capacity/slots, and it also makes every dollar
+  threshold inert — each figure they compare against is `0.00`, so nothing
+  exceeds anything and the gate passes while looking configured. Reports now say
+  so and name the specific settings:
+
+  ```text
+  ⚠ thresholds.max_usd_total cannot fire: no per-byte price is configured, so
+    every cost on this run is 0.00 and no dollar figure can exceed a limit.
+  ```
+
+  It points at the thresholds that do work without a rate — `max_pct_increase`
+  and `max_tib_total` — and is **advisory only**: the gate, the breaches and the
+  exit code are unchanged. Pricing at `0.00` and keeping the dollar thresholds is
+  a valid way to work; it just no longer goes unstated.
+
+- **Reports now warn when a region was priced from the default rate**, naming the
+  location and which way the guess errs. The default is the lowest rate BigQuery
+  charges anywhere, so a location the bundled table has no verified rate for —
+  one opened after the table was last checked — is likely **under**-reported. The
+  warning gives the three ways to set the rate you actually pay
+  (`pricing.regions`, `pricing.usd_per_tib`, `pricing.region`); your value always
+  wins over the built-in table. Advisory only, like the above.
+
+- **`--format json` gains a top-level `notices` array** carrying both warnings
+  above. It is empty on a cleanly-configured run and never affects `verdict`.
+
 - **A net impact line, so a change that *lowers* cost is reported as an outcome.**
   Diff reports now end with one line naming the overall direction in words:
 

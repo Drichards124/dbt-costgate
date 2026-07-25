@@ -371,3 +371,49 @@ def test_markdown_shows_the_net_above_the_gate_verdict():
     out = report.render_markdown(_net_report([_delta("m", 9 * _TIB, 2 * _TIB)]))
     assert "**Net saving:** USD 43.75/run" in out
     assert out.index("Net saving") < out.index("Gate:")
+
+
+# --- advisory notices -------------------------------------------------------
+
+_NOTICE = "thresholds.max_usd_total cannot fire: no per-byte price is configured."
+
+
+def test_notices_render_in_every_format_and_sit_with_the_disclosure():
+    rep = _report()
+    rep.notices = [_NOTICE]
+
+    term = report.render_terminal(rep)
+    assert f"⚠ {_NOTICE}" in term
+    # Placed with the provenance footer, not with the gate: both describe how the
+    # run was configured rather than what the change did.
+    assert term.index(_NOTICE) > term.index("GATE:")
+    assert term.index(_NOTICE) < term.index("Pricing:")
+
+    md = report.render_markdown(rep)
+    assert f"> ⚠ {_NOTICE}" in md
+    assert md.index(_NOTICE) < md.index("<sub>")
+
+    assert json.loads(report.render_json(rep))["notices"] == [_NOTICE]
+
+
+def test_absent_notices_add_nothing():
+    rep = _report()
+    assert rep.notices == []
+    assert "⚠" not in report.render_terminal(rep).replace(
+        "⚠ incremental — figure is the full-refresh scan", ""
+    )
+    assert json.loads(report.render_json(rep))["notices"] == []
+
+
+def test_a_notice_is_not_confusable_with_a_gate_breach():
+    """Breaches are the reason a run failed; a notice is not. Rendering one where
+    the other belongs would make an advisory note read as a blocking one."""
+    rep = _report(status=Status.PASS)
+    rep.verdict.breaches = []
+    rep.notices = [_NOTICE]
+    term = report.render_terminal(rep)
+    assert "GATE: PASS" in term
+    assert f"    - {_NOTICE}" not in term
+    md = report.render_markdown(rep)
+    assert "✅ **Gate: PASS**" in md
+    assert f"- {_NOTICE}" not in md

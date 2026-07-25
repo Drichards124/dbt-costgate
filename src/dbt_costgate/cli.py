@@ -361,11 +361,23 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         raise _UsageError(problem)
 
     verdict = policy.evaluate(deltas, config, currency=table.currency)
+    # Advisory notes about the configuration itself — a setting that cannot do
+    # what it looks like it does. Collected after the verdict to make it plain
+    # they are not inputs to it.
+    notices = [
+        n
+        for n in (
+            policy.unpriced_threshold_notice(config.thresholds, disclosure.priced),
+            table.fallback_notice(disclosure.region_sources),
+        )
+        if n
+    ]
     rep = Report(
         deltas=deltas,
         disclosure=disclosure,
         verdict=verdict,
         mode="diff" if diff_mode else "absolute",
+        notices=notices,
     )
 
     rendered = report.render(rep, config.report_format)

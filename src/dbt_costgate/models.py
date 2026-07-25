@@ -214,6 +214,12 @@ class Report:
     disclosure: PricingDisclosure
     verdict: Verdict
     mode: str  # "diff" | "absolute"
+    # Run-level notes about the *configuration* rather than about a model — a
+    # setting that cannot do what it looks like it does. Advisory by
+    # construction: they are never consulted by `policy.evaluate`, so a notice
+    # can never change a verdict or an exit code. Per-model caveats belong on
+    # `CostDelta.warnings` instead.
+    notices: list[str] = field(default_factory=list)
 
     # --- net impact -------------------------------------------------------
     # The per-model rows say what each model did; nothing said what the change

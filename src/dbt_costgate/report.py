@@ -198,6 +198,10 @@ def render_terminal(report: Report) -> str:
         for b in v.breaches:
             lines.append(f"    - {b}")
     lines.append("")
+    # Notices sit with the disclosure, not with the gate: both describe how this
+    # run was configured rather than what the change did.
+    for n in report.notices:
+        lines.append(f"  ⚠ {n}")
     lines.append(f"  {_disclosure_line(d0)}")
     lines.append(f"  {_DRYRUN_NOTE}")
     return "\n".join(lines)
@@ -288,6 +292,11 @@ def render_markdown(report: Report) -> str:
         for b in v.breaches:
             out.append(f"- {b}")
 
+    if report.notices:
+        out.append("")
+        for n in report.notices:
+            out.append(f"> ⚠ {n}")
+
     out.append("")
     out.append(f"<sub>{_disclosure_line(d0)}<br/>{_DRYRUN_NOTE}</sub>")
     return "\n".join(out)
@@ -324,6 +333,8 @@ def render_json(report: Report) -> str:
             "currency": d0.currency,
             "priced": d0.priced,
         },
+        # Advisory notes about the configuration. Never affects `verdict`.
+        "notices": report.notices,
         # Signed: negative is a saving. Only meaningful in diff mode, which is why
         # every field is null in absolute mode — there is no baseline to net against.
         "net": {
