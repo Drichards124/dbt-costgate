@@ -89,7 +89,6 @@ is a documented proxy, not an invoice prediction.
 ## Roadmap notes
 
 - Per-region custom pricing overrides in config.
-- Production actuals from `INFORMATION_SCHEMA.JOBS`.
 
 Shipped: absolute cost ceilings (`max_usd_total` / `--max-usd-total`,
 `max_tib_total` / `--max-tib-total`) — gate a model's *total* per-run scan, not
