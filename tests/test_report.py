@@ -60,7 +60,7 @@ def test_terminal_shows_rows_flags_disclosure_and_gate():
     out = report.render_terminal(_report())
     assert "fct_orders_daily" in out
     assert "full-refresh" in out
-    assert "+USD 18.19" in out
+    assert "USD +18.19" in out
     assert "not estimated" in out
     assert "GATE: FAIL" in out
     assert "USD 6.25/TiB" in out
@@ -191,7 +191,7 @@ def test_amounts_carry_their_iso_code_not_a_symbol():
     rep.disclosure.currency = "EUR"
     out = report.render_terminal(rep)
     assert "EUR 6.25/TiB" in out
-    assert "+EUR 18.19" in out
+    assert "EUR +18.19" in out
     assert "$" not in out  # no currency symbol survives anywhere
 
 

@@ -36,8 +36,8 @@ def _money(v: float | None, currency: str, *, signed: bool = False) -> str:
     if v is None:
         return "—"
     if signed:
-        sign = "+" if v >= 0 else "-"
-        return f"{sign}{currency} {abs(v):,.2f}"
+        # Sign belongs to the number, not to the currency: `USD +43.75`, `USD -43.75`.
+        return f"{currency} {v:+,.2f}"
     return f"{currency} {v:,.2f}"
 
 
