@@ -142,9 +142,19 @@ class CostDelta:
 
     @property
     def pct_delta(self) -> float | None:
-        if self.usd_current is None or not self.usd_baseline:
+        """Growth in scanned bytes, as a percentage.
+
+        Derived from bytes rather than dollars so it holds under any pricing
+        model. Both sides of a delta are priced at the same regional rate, so
+        that rate cancels in a ratio — this is identical to a dollar-based
+        percentage whenever the rate is non-zero. It differs in exactly one
+        case: a rate of 0, which is a valid setting for capacity/flat-rate
+        slots, and which used to make this return None and silently disable the
+        percentage threshold.
+        """
+        if self.bytes_current is None or not self.bytes_baseline:
             return None
-        return (self.usd_current - self.usd_baseline) / self.usd_baseline * 100.0
+        return (self.bytes_current - self.bytes_baseline) / self.bytes_baseline * 100.0
 
 
 class Status(str, Enum):

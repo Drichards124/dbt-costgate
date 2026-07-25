@@ -4,14 +4,22 @@ from dbt_costgate.config import Config, Thresholds
 from dbt_costgate.models import TIB, CostDelta, Status
 
 
-def _delta(name="m", usd_baseline=1.0, usd_current=10.0, gateable=True, runs=30, bytes_current=10):
+def _delta(
+    name="m",
+    usd_baseline=1.0,
+    usd_current=10.0,
+    gateable=True,
+    runs=30,
+    bytes_current=10,
+    bytes_baseline=1,
+):
     return CostDelta(
         name=name,
         unique_id=f"model.pkg.{name}",
         is_incremental=False,
         is_new=False,
         gateable=gateable,
-        bytes_baseline=1,
+        bytes_baseline=bytes_baseline,
         bytes_current=bytes_current,
         usd_baseline=usd_baseline,
         usd_current=usd_current,
@@ -60,6 +68,45 @@ def test_pct_threshold():
     # 1.0 -> 10.0 is +900%
     v = policy.evaluate([_delta()], cfg)
     assert v.status == Status.FAIL
+
+
+def test_pct_threshold_still_fires_at_a_zero_rate():
+    """A percentage has no currency, so a zero rate must not disable it.
+
+    `pricing.usd_per_tib: 0.00` is documented for capacity/flat-rate slots. It
+    makes every dollar figure 0.00, which correctly neutralises the three USD
+    thresholds — but it used to take the percentage threshold down with them,
+    leaving `max_tib_total` as the only working gate.
+    """
+    slot_priced = _delta(
+        bytes_baseline=1 * TIB,
+        bytes_current=10 * TIB,  # +900% scan growth
+        usd_baseline=0.0,
+        usd_current=0.0,  # rate is 0 -> no dollars anywhere
+    )
+    assert slot_priced.pct_delta == 900.0
+    v = policy.evaluate([slot_priced], Config(thresholds=Thresholds(max_pct_increase=25.0)))
+    assert v.status == Status.FAIL
+    assert v.exit_code == 1
+    assert "+900%" in v.breaches[0]
+
+
+def test_pct_delta_does_not_depend_on_the_rate():
+    """Both sides are priced at one regional rate, so the rate cancels."""
+    same_bytes = dict(bytes_baseline=2 * TIB, bytes_current=3 * TIB)  # +50%
+    at_list_price = _delta(**same_bytes, usd_baseline=12.5, usd_current=18.75)
+    at_negotiated = _delta(**same_bytes, usd_baseline=4.0, usd_current=6.0)
+    at_zero = _delta(**same_bytes, usd_baseline=0.0, usd_current=0.0)
+    assert at_list_price.pct_delta == 50.0
+    assert at_negotiated.pct_delta == 50.0
+    assert at_zero.pct_delta == 50.0
+
+
+def test_pct_delta_is_none_without_a_baseline_scan():
+    """No baseline bytes means no ratio to take — a new model, not a 0% change."""
+    assert _delta(bytes_baseline=0, bytes_current=5 * TIB).pct_delta is None
+    assert _delta(bytes_baseline=None, bytes_current=5 * TIB).pct_delta is None
+    assert _delta(bytes_baseline=1 * TIB, bytes_current=None).pct_delta is None
 
 
 def test_monthly_threshold():

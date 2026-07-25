@@ -318,6 +318,15 @@ fake it; it flags it.
   negotiated/editions rate flatly with `pricing.usd_per_tib`, or per region with
   `pricing.regions` (see below). When a report spans regions with different
   sources, each region is tagged (`override` / `table` / `fallback`).
+- **Capacity / Editions (slot) pricing.** Slot cost cannot be estimated before a
+  query runs — a dry-run reports bytes, never slot time, and slot consumption only
+  exists once a job has executed. So under slots, bytes scanned is a *work* signal,
+  not your invoice. Two thresholds need no rate at all and are the ones to gate
+  on: **`max_tib_total`** (absolute TiB per run) and **`max_pct_increase`**
+  (growth, which has no currency). If you set `pricing.usd_per_tib: 0.00` to stop
+  reporting dollars that would not match your bill, be aware that the three USD
+  thresholds can no longer fire — by design, since you have declared there is no
+  per-byte price — so make sure at least one of the two above is set.
 
 ## Configuration (`.dbt-costgate.yml`)
 
