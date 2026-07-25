@@ -90,7 +90,7 @@ locally in one command with `dbt-costgate check --against main` (dbt-costgate co
 ## Quick start
 
 ```bash
-pip install git+https://github.com/Drichards124/dbt-costgate@v0.7.0
+pip install dbt-costgate
 gcloud auth application-default login
 
 dbt compile
@@ -101,8 +101,8 @@ That's the entire local setup — no baseline, no CI, no config file. Add a
 baseline and thresholds when you want it to *block* a PR; see the
 [usage guide](docs/usage.md).
 
-Not on PyPI yet — every [release](https://github.com/Drichards124/dbt-costgate/releases)
-also ships a wheel, an sdist, and `SHA256SUMS`.
+Every [release](https://github.com/Drichards124/dbt-costgate/releases) also ships a
+wheel, an sdist, and `SHA256SUMS` if you'd rather pin to an artifact.
 
 ## How it works
 
