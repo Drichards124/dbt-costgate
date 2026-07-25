@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status
+from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status, format_money
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
 
@@ -27,18 +27,16 @@ def humanize_bytes(n: int | None) -> str:
     return f"{size:.2f} PiB"  # pragma: no cover
 
 
-def _money(v: float | None, currency: str, *, signed: bool = False) -> str:
-    """Format an amount with its ISO 4217 code, e.g. `USD 6.25` / `+EUR 43.75`.
+# One money formatter for the whole project, shared with policy.py's breach
+# messages. The code goes inline on every amount rather than once in a column
+# header, so a single quoted row or grepped line is never ambiguous.
+_money = format_money
 
-    The code goes inline on every amount rather than once in a column header, so
-    a single quoted row or grepped line is never ambiguous about its currency.
-    """
-    if v is None:
-        return "—"
-    if signed:
-        # Sign belongs to the number, not to the currency: `USD +43.75`, `USD -43.75`.
-        return f"{currency} {v:+,.2f}"
-    return f"{currency} {v:,.2f}"
+
+def _rate(currency: str, rate: float) -> str:
+    """The per-TiB rate, rendered once. Appears in both the header and the
+    disclosure footer, which must not disagree about how a rate looks."""
+    return f"{currency} {rate:,.2f}/TiB"
 
 
 _SOURCE_MARKERS = {
@@ -60,7 +58,7 @@ def _disclosure_line(d: PricingDisclosure) -> str:
     mixed = len(set(d.region_sources.values())) > 1
     parts = []
     for r, rate in d.regions.items():
-        token = f"{r} {d.currency} {rate:,.2f}/TiB"
+        token = f"{r} {_rate(d.currency, rate)}"
         marker = _SOURCE_MARKERS.get(d.region_sources.get(r, "")) if mixed else None
         if marker:
             token += f" ({marker})"
@@ -81,6 +79,50 @@ def _pct_cell(d: CostDelta) -> str:
     return "—" if d.pct_delta is None else f"{d.pct_delta:+,.0f}%"
 
 
+def _net_line(report: Report) -> str | None:
+    """One line naming what the change does overall, and in which direction.
+
+    Says "saving" or "increase" in words rather than leaving a reader to notice a
+    minus sign, so work that *reduces* cost is reported as an outcome instead of
+    as the absence of a failure. Returns None when there is nothing to total:
+    absolute mode has no baseline, so it has no net *change* to report.
+    """
+    if report.mode != "diff":
+        return None
+    rows = report.estimated
+    if not rows:
+        return None
+
+    priced = report.disclosure.priced
+    cur = report.disclosure.currency
+    per_run = report.net_usd_per_run if priced else None
+    net_bytes = report.net_bytes
+
+    # Direction comes from money when priced and from bytes otherwise, so the
+    # word and the figures beside it can never disagree.
+    signal = per_run if priced else net_bytes
+    if not signal:
+        label, figures = "Net change", "none"
+    else:
+        label = "Net saving" if signal < 0 else "Net increase"
+        if priced:
+            parts = [f"{_money(abs(per_run), cur)}/run"]
+            month = report.net_usd_per_month
+            if month is not None:
+                parts.append(f"{_money(abs(month), cur)}/month")
+            figures = " · ".join(parts)
+        else:
+            figures = f"{humanize_bytes(abs(net_bytes))}/run scanned"
+
+    skipped = report.unestimated_count
+    caveat = (
+        f" (across {len(rows)} of {len(report.deltas)} models; the rest were not estimated)"
+        if skipped
+        else ""
+    )
+    return f"{label}: {figures}{caveat}"
+
+
 def render_terminal(report: Report) -> str:
     lines: list[str] = []
     d0 = report.disclosure
@@ -90,7 +132,7 @@ def render_terminal(report: Report) -> str:
     if not d0.priced:
         header += " · bytes only (no per-byte price configured)"
     elif rate is not None:
-        header += f" · on-demand {d0.currency} {rate:,.2f}/TiB · {d0.source}"
+        header += f" · on-demand {_rate(d0.currency, rate)} · {d0.source}"
     lines.append(header)
     lines.append("")
 
@@ -140,6 +182,11 @@ def render_terminal(report: Report) -> str:
             lines.append(f"      ⚠ {w}")
         if d.error:
             lines.append(f"      • {d.error}")
+
+    net = _net_line(report)
+    if net:
+        lines.append("")
+        lines.append(f"  {net}")
 
     lines.append("")
     v = report.verdict
@@ -224,6 +271,12 @@ def render_markdown(report: Report) -> str:
         for name, e in errors:
             out.append(f"> • **{name}** — {e}")
 
+    net = _net_line(report)
+    if net:
+        out.append("")
+        label, _, rest = net.partition(": ")
+        out.append(f"**{label}:** {rest}")
+
     out.append("")
     v = report.verdict
     if v.status == Status.PASS:
@@ -270,6 +323,15 @@ def render_json(report: Report) -> str:
             # contract, and renaming them would break every existing consumer.
             "currency": d0.currency,
             "priced": d0.priced,
+        },
+        # Signed: negative is a saving. Only meaningful in diff mode, which is why
+        # every field is null in absolute mode — there is no baseline to net against.
+        "net": {
+            "bytes": report.net_bytes if report.mode == "diff" else None,
+            "usd_per_run": report.net_usd_per_run if report.mode == "diff" else None,
+            "usd_per_month": report.net_usd_per_month if report.mode == "diff" else None,
+            "models_estimated": len(report.estimated),
+            "models_total": len(report.deltas),
         },
         "models": [
             {

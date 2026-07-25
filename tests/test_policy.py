@@ -171,3 +171,26 @@ def test_zero_tolerance_cap_breaches_any_nonzero_scan():
     cfg = Config(thresholds=Thresholds(max_tib_total=0.0))
     v = policy.evaluate([_delta(bytes_current=1)], cfg)
     assert v.status == Status.FAIL
+
+
+def test_breach_messages_use_the_shared_money_formatter():
+    """Guards the drift that happened twice: policy.py had its own copy of the
+    money format string, so the sign moved onto the number in the report and not
+    in the breach message. Asserting against `format_money` itself means the two
+    cannot disagree again — whichever side changes, this fails."""
+    from dbt_costgate.models import format_money
+
+    d = _delta(bytes_baseline=1 * TIB, bytes_current=9 * TIB, usd_baseline=6.25, usd_current=56.25)
+    cfg = Config(thresholds=Thresholds(max_usd_increase_per_run=10.0))
+    breach = policy.evaluate([d], cfg, currency="USD").breaches[0]
+
+    assert format_money(50.0, "USD", signed=True) in breach  # the delta, signed
+    assert format_money(10.0, "USD") in breach  # the threshold, unsigned
+    assert "+USD" not in breach  # the old, wrong placement
+
+
+def test_breach_messages_carry_the_configured_currency():
+    d = _delta(bytes_baseline=1 * TIB, bytes_current=9 * TIB, usd_baseline=6.25, usd_current=56.25)
+    cfg = Config(thresholds=Thresholds(max_usd_increase_per_run=10.0))
+    breach = policy.evaluate([d], cfg, currency="EUR").breaches[0]
+    assert "EUR +50.00/run exceeds EUR 10.00" in breach

@@ -51,7 +51,7 @@ def _report(mode="diff", status=Status.FAIL):
         last_verified="2026-07-23",
     )
     verdict = Verdict(
-        status=status, breaches=["fct_orders_daily: +USD 18.19/run exceeds USD 5.00"], exit_code=1
+        status=status, breaches=["fct_orders_daily: USD +18.19/run exceeds USD 5.00"], exit_code=1
     )
     return Report(deltas=deltas, disclosure=disclosure, verdict=verdict, mode=mode)
 
@@ -259,3 +259,115 @@ def test_terminal_reports_the_same_figures_as_markdown_in_both_shapes():
     assert "+350%" in report.render_terminal(_unpriced_report())
     priced_out = report.render_terminal(_report())
     assert "%" in priced_out and "USD 18.19" in priced_out
+
+
+# --- net impact -------------------------------------------------------------
+
+_TIB = 1024**4
+
+
+def _delta(name, baseline, current, rate=6.25, runs=30, error=None):
+    return CostDelta(
+        name=name,
+        unique_id=f"model.pkg.{name}",
+        is_incremental=False,
+        is_new=False,
+        gateable=True,
+        bytes_baseline=baseline,
+        bytes_current=current,
+        usd_baseline=None if baseline is None else baseline / _TIB * rate,
+        usd_current=None if current is None else current / _TIB * rate,
+        region="US",
+        runs_per_month=runs,
+        error=error,
+    )
+
+
+def _net_report(deltas, rate=6.25, mode="diff", status=Status.PASS, breaches=()):
+    return Report(
+        deltas=deltas,
+        disclosure=PricingDisclosure(
+            regions={"US": rate},
+            source="built-in table",
+            table_version="2026.07",
+            last_verified="2026-07-25",
+            region_sources={"US": "region-table"},
+        ),
+        verdict=Verdict(status=status, breaches=list(breaches), exit_code=0),
+        mode=mode,
+    )
+
+
+def test_a_change_that_lowers_cost_is_reported_as_a_saving():
+    rep = _net_report([_delta("fct_orders", 9 * _TIB, 2 * _TIB)])
+    out = report.render_terminal(rep)
+    assert "Net saving: USD 43.75/run · USD 1,312.50/month" in out
+    # the figures are unsigned because the word already carries the direction
+    assert "Net saving: USD -43.75" not in out
+
+
+def test_a_change_that_raises_cost_is_reported_as_an_increase():
+    rep = _net_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB)])
+    assert "Net increase: USD 43.75/run" in report.render_terminal(rep)
+
+
+def test_net_sums_across_models_and_can_be_a_saving_while_the_gate_fails():
+    """The net is a measurement; the gate is a verdict. They may disagree.
+
+    A pull request can reduce total cost while still containing one model that
+    breached its own threshold, and the report must not imply otherwise.
+    """
+    deltas = [_delta("a", 2 * _TIB, 9 * _TIB), _delta("b", 12 * _TIB, 3 * _TIB)]
+    rep = _net_report(deltas, status=Status.FAIL, breaches=["a: over"])
+    out = report.render_terminal(rep)
+    assert "Net saving: USD 12.50/run" in out  # +7 TiB then -9 TiB = -2 TiB
+    assert "GATE: FAIL" in out
+
+
+def test_no_net_movement_says_so_rather_than_showing_zero():
+    rep = _net_report([_delta("fct_orders", 4 * _TIB, 4 * _TIB)])
+    assert "Net change: none" in report.render_terminal(rep)
+
+
+def test_net_discloses_when_some_models_could_not_be_estimated():
+    deltas = [_delta("a", 2 * _TIB, 9 * _TIB), _delta("b", None, None, error="not estimated")]
+    out = report.render_terminal(_net_report(deltas))
+    assert "across 1 of 2 models" in out
+
+
+def test_net_is_bytes_when_no_rate_is_configured():
+    rep = _net_report([_delta("fct_orders", 9 * _TIB, 2 * _TIB, rate=0.0)], rate=0.0)
+    out = report.render_terminal(rep)
+    assert "Net saving: 7.00 TiB/run scanned" in out
+    assert "USD" not in out
+
+
+def test_absolute_mode_has_no_net_because_it_has_no_baseline():
+    rep = _net_report([_delta("fct_orders", None, 9 * _TIB)], mode="absolute")
+    assert "Net " not in report.render_terminal(rep)
+    assert "Net " not in report.render_markdown(rep)
+
+
+def test_monthly_net_is_omitted_rather_than_summed_partially():
+    # one model has no run frequency, so a monthly total would silently omit it
+    deltas = [_delta("a", 2 * _TIB, 9 * _TIB), _delta("b", 1 * _TIB, 2 * _TIB, runs=None)]
+    rep = _net_report(deltas)
+    assert rep.net_usd_per_month is None
+    out = report.render_terminal(rep)
+    assert "/run" in out and "/month" not in out.split("Net increase")[1].split("\n")[0]
+
+
+def test_json_net_is_signed_so_a_saving_is_negative():
+    saving = json.loads(report.render_json(_net_report([_delta("m", 9 * _TIB, 2 * _TIB)])))
+    assert saving["net"]["usd_per_run"] < 0
+    assert saving["net"]["bytes"] < 0
+    assert saving["net"]["models_estimated"] == 1
+
+    rise = json.loads(report.render_json(_net_report([_delta("m", 2 * _TIB, 9 * _TIB)])))
+    assert rise["net"]["usd_per_run"] > 0
+
+
+def test_markdown_shows_the_net_above_the_gate_verdict():
+    out = report.render_markdown(_net_report([_delta("m", 9 * _TIB, 2 * _TIB)]))
+    assert "**Net saving:** USD 43.75/run" in out
+    assert out.index("Net saving") < out.index("Gate:")
