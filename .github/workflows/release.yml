@@ -74,8 +74,11 @@ jobs:
       # Hand the distributions to the publish job. SHA256SUMS is deliberately not
       # included: PyPI rejects anything in the upload directory that isn't a
       # distribution, and it belongs to the GitHub Release, not to PyPI.
+      # Note: do NOT set `archive: false` here. That mode uploads a single file
+      # unzipped, ignores `name`, and fails outright on a glob matching more than
+      # one file — and this step deliberately uploads two (wheel and sdist).
       - name: Upload distributions for the PyPI job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: |
@@ -98,8 +101,11 @@ jobs:
     permissions:
       id-token: write
     steps:
+      # v8 errors on a digest mismatch rather than warning, which is what we want
+      # on the publish path: a corrupted distribution should fail the run, not
+      # reach PyPI.
       - name: Download the distributions built above
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
