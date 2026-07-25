@@ -80,3 +80,50 @@ def test_zero_rate_is_valid_override():
     rate = table.rate_for("US")
     assert rate.usd_per_tib == 0.0
     assert rate.source == "user-override"
+
+
+def test_regional_locations_resolve_from_the_table_not_the_default():
+    """Regional (non-multi-region) locations carry their own published rate.
+
+    Before the table listed them these all fell through to `default-fallback` at
+    the US rate, which under-reported cost for every team outside US/EU.
+    """
+    table = PricingTable.load()
+    for region, expected in [
+        ("europe-west3", 8.125),  # Frankfurt
+        ("asia-northeast1", 7.50),  # Tokyo
+        ("southamerica-east1", 11.25),  # Sao Paulo — most expensive
+        ("us-south1", 7.50),  # Dallas — a US region that is NOT 6.25
+        ("asia-southeast4", 6.5625),  # Kuala Lumpur
+    ]:
+        rate = table.rate_for(region)
+        assert rate.source == "region-table", f"{region} should come from the table"
+        assert rate.usd_per_tib == expected, region
+
+
+def test_multi_region_rates_are_unchanged():
+    """The two rates that existed before the table was extended still hold."""
+    table = PricingTable.load()
+    for region in ("US", "EU"):
+        rate = table.rate_for(region)
+        assert rate.source == "region-table"
+        assert rate.usd_per_tib == 6.25
+
+
+def test_regional_location_lookup_is_case_insensitive():
+    # BigQuery reports multi-regions upper-cased; a regional id may arrive either way
+    table = PricingTable.load()
+    assert table.rate_for("EUROPE-WEST3").usd_per_tib == 8.125
+    assert table.rate_for("europe-west3").usd_per_tib == 8.125
+
+
+def test_every_builtin_rate_is_in_a_plausible_band():
+    """Guards against a decimal-point slip in a future one-line rate PR.
+
+    A user override may legitimately be 0 (flat-rate slots), but a *published*
+    on-demand rate never is, and none is anywhere near 0.625 or 62.5.
+    """
+    table = PricingTable.load()
+    assert table.regions, "the built-in table must not be empty"
+    for region, rate in table.regions.items():
+        assert 1.0 <= rate <= 100.0, f"{region}={rate} is outside the plausible band"
