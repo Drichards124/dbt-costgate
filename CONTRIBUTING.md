@@ -69,6 +69,25 @@ is not enough):
 ruff check . && ruff format --check .
 ```
 
+## If you change what a report looks like
+
+Every example report in `README.md` and `docs/usage.md` is generated from the real
+renderers, and the test suite fails if one drifts. Regenerate them:
+
+```bash
+python scripts/gen_samples.py
+```
+
+Add or edit an example in `scripts/samples.py`, then place
+`<!-- BEGIN GENERATED: <name> -->` / `<!-- END GENERATED: <name> -->` where it
+should appear. A sample that no example references is reported as unused, so the
+file cannot accumulate examples nobody reads.
+
+Please don't hand-edit the text inside those markers. An example that says
+something the code does not is worse than no example: this repo shipped one that
+priced 412.50 MiB at $2.51 — about a thousand times too high — and it survived
+several releases precisely because nothing compared it to real output.
+
 ## Every source file carries an SPDX header
 
 ```python

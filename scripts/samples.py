@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Canonical example reports, rendered by the real renderers.
+
+Single source of truth for every example in README.md and docs/usage.md.
+`gen_samples.py` writes these into those files; `tests/test_samples.py` asserts
+what is committed still matches what the renderers produce, so an example cannot
+quietly drift away from the code the way a hand-written one does.
+
+No BigQuery and no credentials are involved: `report.render_*` are pure functions
+of a `Report`, so a hand-built one renders authentic output. The figures are
+illustrative; the formatting is not.
+"""
+
+from __future__ import annotations
+
+from dbt_costgate import policy, report
+from dbt_costgate.config import Config, Thresholds
+from dbt_costgate.models import TIB, CostDelta, PricingDisclosure, Report
+
+MIB = 1024**2
+GIB = 1024**3
+
+# Rates are the real published ones for these regions, so an example never
+# implies a price that dbt-costgate would not actually apply.
+US_RATE = 6.25
+NEGOTIATED_RATE = 4.10
+
+
+def _delta(
+    name: str,
+    current: int | None,
+    baseline: int | None = None,
+    *,
+    rate: float = US_RATE,
+    incremental: bool = False,
+    new: bool = False,
+    warning: str | None = None,
+    error: str | None = None,
+    runs: int | None = 30,
+) -> CostDelta:
+    def usd(b: int | None) -> float | None:
+        return None if b is None else b / TIB * rate
+
+    return CostDelta(
+        name=name,
+        unique_id=f"model.shop.{name}",
+        is_incremental=incremental,
+        is_new=new,
+        gateable=error is None,
+        bytes_baseline=baseline,
+        bytes_current=current,
+        usd_baseline=usd(baseline),
+        usd_current=usd(current),
+        region="US",
+        warnings=[warning] if warning else [],
+        error=error,
+        runs_per_month=runs,
+    )
+
+
+def _report(deltas, *, mode: str, rate: float = US_RATE, source: str, thresholds: Thresholds):
+    disclosure = PricingDisclosure(
+        regions={"US": rate},
+        source=source,
+        table_version="2026.07",
+        last_verified="2026-07-25",
+        region_sources={"US": "region-table" if rate == US_RATE else "user-override"},
+    )
+    return Report(
+        deltas=deltas,
+        disclosure=disclosure,
+        verdict=policy.evaluate(deltas, Config(thresholds=thresholds), currency="USD"),
+        mode=mode,
+    )
+
+
+# The change every example describes: a partition filter was dropped from an
+# incremental model, and a small new dimension was added alongside it.
+def _pr_deltas(rate: float = US_RATE):
+    # The rate must be threaded in, not defaulted: pricing the deltas at one rate
+    # while the disclosure line claims another produces a sample that contradicts
+    # itself — which is exactly the class of error these generated samples exist
+    # to prevent, so it must not be reintroduced here.
+    return [
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            int(0.80 * TIB),
+            rate=rate,
+            incremental=True,
+            warning="incremental — figure is the full-refresh scan",
+        ),
+        _delta("dim_customers", int(412.5 * MIB), rate=rate, new=True),
+    ]
+
+
+def _gate() -> Thresholds:
+    return Thresholds(max_usd_increase_per_run=5.00, max_pct_increase=25.0)
+
+
+def pr_comment() -> str:
+    """What the GitHub Action posts. A PR comment *is* rendered markdown, so this
+    is the comment itself rather than a picture of one."""
+    return report.render_markdown(
+        _report(_pr_deltas(), mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
+def diff_terminal() -> str:
+    return report.render_terminal(
+        _report(_pr_deltas(), mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
+def local_terminal() -> str:
+    """Zero-setup local run: no baseline, so each model's current scan is priced."""
+    deltas = [
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            incremental=True,
+            warning="incremental — figure is the full-refresh scan",
+        ),
+        _delta("dim_customers", int(0.4016 * TIB)),
+    ]
+    return report.render_terminal(
+        _report(deltas, mode="absolute", source="built-in table", thresholds=Thresholds())
+    )
+
+
+def saving_terminal() -> str:
+    """A change that *lowers* cost — someone added a partition filter back."""
+    deltas = [_delta("fct_orders_daily", int(2.00 * TIB), int(9.00 * TIB))]
+    return report.render_terminal(
+        _report(deltas, mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
+def negotiated_terminal() -> str:
+    """A team on a negotiated or Editions rate: `pricing.usd_per_tib: 4.10`."""
+    return report.render_terminal(
+        _report(
+            _pr_deltas(NEGOTIATED_RATE),
+            mode="diff",
+            rate=NEGOTIATED_RATE,
+            source="user override",
+            thresholds=_gate(),
+        )
+    )
+
+
+def slots_terminal() -> str:
+    """Capacity/Editions slots: `pricing.usd_per_tib: 0.00`. No per-byte price
+    exists, so the report measures scanned bytes and gates on growth."""
+    deltas = [
+        _delta("fct_orders_daily", int(2.91 * TIB), int(0.80 * TIB), rate=0.0, incremental=True)
+    ]
+    return report.render_terminal(
+        _report(deltas, mode="diff", rate=0.0, source="user override", thresholds=_gate())
+    )
+
+
+# name -> (renderer, fence language). The name is the marker used in the docs.
+# A fence of None injects the sample raw: a PR comment *is* rendered markdown, so
+# letting GitHub render it shows the comment itself rather than its source.
+SAMPLES = {
+    "pr-comment": (pr_comment, None),
+    "diff-terminal": (diff_terminal, "text"),
+    "local-terminal": (local_terminal, "text"),
+    "saving-terminal": (saving_terminal, "text"),
+    "negotiated-terminal": (negotiated_terminal, "text"),
+    "slots-terminal": (slots_terminal, "text"),
+}
+
+
+def render(name: str) -> str:
+    return SAMPLES[name][0]()
+
+
+def fence(name: str) -> str:
+    return SAMPLES[name][1]
