@@ -85,6 +85,12 @@ ruff check . && ruff format --check .
    runs once merged to `ple`, including a packaged-artifact smoke test.
 4. Changes that pass PLE are promoted to `main` on the release schedule and
    cut into a signed release.
+5. Tagging builds the artifacts, publishes to PyPI, and creates the GitHub
+   Release automatically. **Publishing the Action to the Marketplace is manual
+   and per-release** — the listing stays on whichever release last had the box
+   ticked. The release run's summary links straight to the right page, and the
+   `Marketplace drift` workflow fails weekly until the listing matches the
+   latest release.
 
 ## Reporting security issues
 
