@@ -85,3 +85,47 @@ def test_a_sample_never_claims_a_rate_its_amounts_contradict():
         "the negotiated sample shows the same amount as the default one, so its "
         "deltas were priced at the wrong rate"
     )
+
+
+# --- documentation links ----------------------------------------------------
+
+_DOCS = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "docs/usage.md", "docs/explained.md"]
+_LINK = __import__("re").compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+
+
+def _slug(heading: str) -> str:
+    """GitHub's anchor rule: lowercase, drop punctuation, spaces to hyphens."""
+    text = heading.lstrip("#").strip().lower()
+    kept = [c for c in text if c.isalnum() or c in " -_"]
+    return "".join(kept).replace(" ", "-")
+
+
+@pytest.mark.parametrize("doc", _DOCS)
+def test_every_relative_link_in_the_docs_resolves(doc: str):
+    """A broken link in the docs is invisible until a reader hits it, and this
+    change added a lot of cross-references between pages."""
+    path = ROOT / doc
+    text = path.read_text("utf-8")
+    anchors = {_slug(ln) for ln in text.splitlines() if ln.startswith("#")}
+    broken: list[str] = []
+
+    for target in _LINK.findall(text):
+        if target.startswith(("http://", "https://", "mailto:")):
+            continue
+        file_part, _, anchor = target.partition("#")
+        if not file_part:  # same-page anchor
+            if anchor not in anchors:
+                broken.append(f"{target} (no such heading in {doc})")
+            continue
+        resolved = (path.parent / file_part).resolve()
+        if not resolved.exists():
+            broken.append(f"{target} (no such file)")
+            continue
+        if anchor:
+            other = {
+                _slug(ln) for ln in resolved.read_text("utf-8").splitlines() if ln.startswith("#")
+            }
+            if anchor not in other:
+                broken.append(f"{target} (no such heading in {file_part})")
+
+    assert not broken, f"broken links in {doc}:\n  " + "\n  ".join(broken)

@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import samples  # noqa: E402  (needs the path insert above)
 
 ROOT = Path(__file__).resolve().parent.parent
-TARGETS = ["README.md", "docs/usage.md"]
+TARGETS = ["README.md", "docs/usage.md", "docs/explained.md"]
 
 BEGIN = "<!-- BEGIN GENERATED: {name} -->"
 END = "<!-- END GENERATED: {name} -->"

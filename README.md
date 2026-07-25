@@ -24,6 +24,9 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 [Roadmap](#roadmap) ·
 [Contributing](CONTRIBUTING.md)
 
+**New here? Start with [dbt-costgate, explained](docs/explained.md)** — plain
+English, ten minutes, no prior context assumed.
+
 </div>
 
 > [!NOTE]
@@ -130,6 +133,21 @@ baseline and thresholds when you want it to *block* a PR; see the
 Every [release](https://github.com/Drichards124/dbt-costgate/releases) also ships a
 wheel, an sdist, and `SHA256SUMS` if you'd rather pin to an artifact.
 
+## Documentation
+
+So you know where to look before you open anything:
+
+| Document | What's inside | Go here when |
+|---|---|---|
+| **[Explained](docs/explained.md)** | Plain-English guide: how it works, what it costs to run, which pricing setup you're in, **every config key**, the deliberate non-goals, and when a number can be wrong | You're new, or you want to know what a setting does |
+| **[Usage guide](docs/usage.md)** | The how-to: install, CI setup, baselines, thresholds, the GitHub Action, worked examples for on-demand / negotiated / slot pricing | You're setting it up or changing how it runs |
+| **[Architecture](docs/architecture.md)** | Why it's built this way, the invariants, the hard edges | You're contributing or reviewing a change |
+| **[Security](SECURITY.md)** | Threat model, and what counts as a vulnerability | You're reviewing it for use next to production credentials |
+| **[Changelog](CHANGELOG.md)** | What changed in each release, in operator terms | You're upgrading |
+
+Every example report in these docs is generated from the real renderers, and CI
+fails if one drifts — so what you read is what the tool actually prints.
+
 ## How it works
 
 | Step | What happens | Cost to you |
@@ -204,6 +222,8 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 
 <div align="center">
 
+[Explained](docs/explained.md) ·
+[Usage guide](docs/usage.md) ·
 [Contributing](CONTRIBUTING.md) ·
 [Security policy](SECURITY.md) ·
 [Changelog](CHANGELOG.md) ·
