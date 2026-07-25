@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Canonical example reports, rendered by the real renderers.
+"""Canonical generated doc content: example reports, and the config reference.
 
 Single source of truth for every example in README.md and docs/usage.md.
 `gen_samples.py` writes these into those files; `tests/test_samples.py` asserts
@@ -149,6 +149,61 @@ def negotiated_terminal() -> str:
     )
 
 
+def mixed_frequency_terminal() -> str:
+    """The same change, with a per-model `run_frequency`.
+
+    Each row states the frequency it used, so a monthly figure is never an
+    unexplained number. The incremental here is fully rebuilt weekly rather than
+    nightly, which is the distinction that matters: the figure being multiplied is
+    the rebuild scan, not a nightly incremental run.
+    """
+    deltas = [
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            int(0.80 * TIB),
+            incremental=True,
+            warning="incremental — figure is the full-refresh scan",
+            runs=4,
+        ),
+        _delta("dim_customers", int(412.5 * MIB), new=True, runs=30),
+    ]
+    return report.render_terminal(
+        _report(deltas, mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
+def config_reference() -> str:
+    """Every `.dbt-costgate.yml` key, rendered from `CONFIG_REFERENCE` — the same
+    registry the `dbt-costgate config` command prints.
+
+    Generated rather than written, because a hand-maintained config table is
+    guaranteed to fall behind: it would have to be edited every time a key is
+    added, by someone who has just finished adding the key. `CONFIG_REFERENCE`
+    already has a bidirectional drift test against the `Config` dataclass, so a
+    key cannot exist without appearing here.
+    """
+    from dbt_costgate.config import CONFIG_REFERENCE
+
+    def default(value) -> str:
+        if value is None:
+            return "_none_"
+        if value == {} or value == []:
+            return "_empty_"
+        return f"`{value}`"
+
+    rows = [
+        "| Key | Type | Default | What it does |",
+        "|---|---|---|---|",
+    ]
+    for field in CONFIG_REFERENCE:
+        help_text = " ".join(field.help.split())
+        rows.append(
+            f"| `{field.key}` | `{field.type_label}` | {default(field.default)} | {help_text} |"
+        )
+    return "\n".join(rows)
+
+
 def slots_terminal() -> str:
     """Capacity/Editions slots: `pricing.usd_per_tib: 0.00`. No per-byte price
     exists, so the report measures scanned bytes and gates on growth."""
@@ -170,6 +225,8 @@ SAMPLES = {
     "saving-terminal": (saving_terminal, "text"),
     "negotiated-terminal": (negotiated_terminal, "text"),
     "slots-terminal": (slots_terminal, "text"),
+    "mixed-frequency-terminal": (mixed_frequency_terminal, "text"),
+    "config-reference": (config_reference, None),
 }
 
 
