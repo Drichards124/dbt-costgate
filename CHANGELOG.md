@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-25
+
 ### Changed
 
 - **Renamed from `costgate` to `dbt-costgate`.** The name `costgate` is taken on
