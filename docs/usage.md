@@ -12,14 +12,14 @@ nothing is executed), prices the bytes region-aware, and reports.
 ## Install
 
 ```bash
-pip install git+https://github.com/Drichards124/dbt-costgate@v0.7.0
+pip install dbt-costgate      # or: pipx install dbt-costgate / uv tool install dbt-costgate
 ```
 
 Or download the wheel from the [latest release](https://github.com/Drichards124/dbt-costgate/releases)
 and `pip install` it — each release ships a wheel, an sdist, and `SHA256SUMS`.
 
-> Not on PyPI yet. Pin an exact tag rather than a branch, so an upgrade is
-> always something you chose.
+> Releases are published to PyPI from CI over OIDC (no API token exists), and
+> each one is also attached to its GitHub Release.
 
 Requires Python ≥ 3.9 and BigQuery access via ADC:
 
@@ -252,7 +252,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/dbt-costgate@v0.7.0
+      - uses: Drichards124/dbt-costgate@v0.7.1
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .dbt-costgate.yml

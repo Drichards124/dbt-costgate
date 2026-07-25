@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-25
+
+### Added
+
+- **Published to PyPI.** `pip install dbt-costgate` now works, alongside
+  `pipx install` and `uv tool install`. Releases are published from CI using
+  PyPI trusted publishing (OIDC), so no API token exists for this project.
+  Every release still attaches a wheel, an sdist, and `SHA256SUMS` to its GitHub
+  Release if you prefer to pin to a checksummed artifact.
+
 ## [0.7.0] - 2026-07-25
 
 ### Changed
