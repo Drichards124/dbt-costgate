@@ -49,6 +49,7 @@ class Config:
     region: str | None = None
     usd_per_tib: float | None = None
     pricing_regions: dict[str, float] = field(default_factory=dict)
+    currency: str | None = None
     thresholds: Thresholds = field(default_factory=Thresholds)
     run_frequency_default: int | None = None
     run_frequency_models: dict[str, int] = field(default_factory=dict)
@@ -88,6 +89,7 @@ class Config:
             region=pricing.get("region"),
             usd_per_tib=_opt_float(pricing.get("usd_per_tib")),
             pricing_regions=_region_rates(pricing.get("regions")),
+            currency=_opt_currency(pricing.get("currency")),
             thresholds=Thresholds(
                 max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
                 max_pct_increase=_opt_float(thr.get("max_pct_increase")),
@@ -108,6 +110,25 @@ class Config:
 
     def runs_per_month(self, model_name: str) -> int | None:
         return self.run_frequency_models.get(model_name, self.run_frequency_default)
+
+
+def _opt_currency(raw) -> str | None:
+    """Parse `pricing.currency` as an ISO 4217 code.
+
+    Validated as three letters rather than checked against a list of codes: a
+    hard-coded list would reject valid codes as they change, and the point of the
+    check is to catch `pricing.currency: "$"` or `Euro`, not to police ISO's
+    registry. Stored upper-case so the report label is consistent.
+    """
+    if raw is None:
+        return None
+    code = str(raw).strip().upper()
+    if not (len(code) == 3 and code.isalpha()):
+        raise ValueError(
+            f"pricing.currency: expected a three-letter ISO 4217 code such as USD or EUR, "
+            f"got {raw!r}"
+        )
+    return code
 
 
 def _region_rates(raw) -> dict[str, float]:
@@ -171,6 +192,17 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Flat on-demand rate override (USD/TiB) for every region. Default: the "
         "built-in per-region rate table.",
+    ),
+    ConfigField(
+        "pricing.currency",
+        "currency",
+        "str",
+        None,
+        "ISO 4217 code the reported amounts are labelled with, e.g. EUR. Default: "
+        "USD, matching the built-in table. This labels a rate you supplied "
+        "yourself — dbt-costgate never converts between currencies — so any "
+        "region still priced from the built-in table is an error, not a "
+        "conversion.",
     ),
     ConfigField(
         "pricing.regions",

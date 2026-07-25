@@ -86,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--project", help="BigQuery project for dry-run jobs (default: ADC).")
     check.add_argument("--region", help="Force a pricing region (default: auto-detect).")
     check.add_argument("--usd-per-tib", type=float, help="Override the on-demand rate.")
+    check.add_argument(
+        "--currency",
+        help="ISO 4217 code to label amounts with (default USD). Labels a rate you "
+        "supplied; never converts.",
+    )
     check.add_argument("--fail-on", choices=["never", "warn", "fail"], help="Gate strictness.")
     check.add_argument("--max-usd-per-run", type=float, help="Fail if $/run increase exceeds this.")
     check.add_argument("--max-pct", type=float, help="Fail if %% increase exceeds this.")
@@ -170,6 +175,7 @@ def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
         table_version=table.version,
         last_verified=table.last_verified,
         region_sources=region_sources,
+        currency=table.currency,
     )
 
 
@@ -342,12 +348,22 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         override_regions=config.pricing_regions,
         override_usd_per_tib=config.usd_per_tib,
         override_region=config.region,
+        currency=args.currency or config.currency,
     )
     deltas = estimate.build_deltas(estimates, table, config)
-    verdict = policy.evaluate(deltas, config)
+    disclosure = _build_disclosure(table, deltas)
+
+    # A non-default currency describes a rate the user supplied. If any applied
+    # rate still came from the bundled (USD) table, labelling it otherwise would
+    # be silently wrong, so refuse rather than mislabel.
+    problem = table.currency_is_sound(disclosure.region_sources)
+    if problem:
+        raise _UsageError(problem)
+
+    verdict = policy.evaluate(deltas, config, currency=table.currency)
     rep = Report(
         deltas=deltas,
-        disclosure=_build_disclosure(table, deltas),
+        disclosure=disclosure,
         verdict=verdict,
         mode="diff" if diff_mode else "absolute",
     )

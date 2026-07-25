@@ -127,3 +127,36 @@ def test_every_builtin_rate_is_in_a_plausible_band():
     assert table.regions, "the built-in table must not be empty"
     for region, rate in table.regions.items():
         assert 1.0 <= rate <= 100.0, f"{region}={rate} is outside the plausible band"
+
+
+def test_currency_defaults_to_the_bundled_tables_own_code():
+    table = PricingTable.load()
+    assert table.currency == "USD"
+    assert table.table_currency == "USD"
+    assert table.currency_is_sound({"US": "region-table"}) is None
+
+
+def test_non_default_currency_is_refused_while_any_rate_is_the_bundled_one():
+    """The bundled table is USD. Relabelling it EUR would be silently wrong."""
+    table = PricingTable.load(currency="EUR")
+    problem = table.currency_is_sound({"US": "region-table", "europe-west3": "user-override"})
+    assert problem is not None
+    assert "US" in problem and "EUR" in problem
+    assert "does not convert" in problem
+    # the region that IS user-supplied must not be blamed
+    assert "europe-west3" not in problem
+
+
+def test_non_default_currency_is_fine_once_every_rate_is_user_supplied():
+    table = PricingTable.load(currency="EUR")
+    assert table.currency_is_sound({"US": "user-override", "EU": "user-override"}) is None
+
+
+def test_default_fallback_also_counts_as_a_bundled_rate():
+    # the fallback is a USD number too, so it is not ours to relabel
+    table = PricingTable.load(currency="GBP")
+    assert table.currency_is_sound({"mars-central1": "default-fallback"}) is not None
+
+
+def test_currency_is_normalised_to_upper_case():
+    assert PricingTable.load(currency="eur").currency == "EUR"

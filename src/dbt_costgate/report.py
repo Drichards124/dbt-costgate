@@ -27,13 +27,18 @@ def humanize_bytes(n: int | None) -> str:
     return f"{size:.2f} PiB"  # pragma: no cover
 
 
-def _usd(v: float | None, *, signed: bool = False) -> str:
+def _money(v: float | None, currency: str, *, signed: bool = False) -> str:
+    """Format an amount with its ISO 4217 code, e.g. `USD 6.25` / `+EUR 43.75`.
+
+    The code goes inline on every amount rather than once in a column header, so
+    a single quoted row or grepped line is never ambiguous about its currency.
+    """
     if v is None:
         return "—"
     if signed:
-        sign = "+" if v >= 0 else "-"
-        return f"{sign}${abs(v):,.2f}"
-    return f"${v:,.2f}"
+        # Sign belongs to the number, not to the currency: `USD +43.75`, `USD -43.75`.
+        return f"{currency} {v:+,.2f}"
+    return f"{currency} {v:,.2f}"
 
 
 _SOURCE_MARKERS = {
@@ -46,10 +51,16 @@ _SOURCE_MARKERS = {
 def _disclosure_line(d: PricingDisclosure) -> str:
     # When a report mixes provenance across regions, tag each region so the
     # aggregate label ("built-in table + user override") is not ambiguous.
+    if not d.priced:
+        regions = ", ".join(d.regions) or "—"
+        return (
+            f"Pricing: none applied — rate is 0 for {regions}, so this report measures "
+            f"scanned bytes only. Slot/capacity cost cannot be estimated before a query runs."
+        )
     mixed = len(set(d.region_sources.values())) > 1
     parts = []
     for r, rate in d.regions.items():
-        token = f"{r} ${rate:,.2f}/TiB"
+        token = f"{r} {d.currency} {rate:,.2f}/TiB"
         marker = _SOURCE_MARKERS.get(d.region_sources.get(r, "")) if mixed else None
         if marker:
             token += f" ({marker})"
@@ -58,10 +69,16 @@ def _disclosure_line(d: PricingDisclosure) -> str:
     return f"Pricing: {regions} · {d.source} (table {d.table_version}, verified {d.last_verified})"
 
 
-def _delta_cell(d: CostDelta) -> str:
+def _delta_cell(d: CostDelta, currency: str) -> str:
     if d.error:
         return "not estimated"
-    return _usd(d.usd_per_run_delta, signed=True)
+    return _money(d.usd_per_run_delta, currency, signed=True)
+
+
+def _pct_cell(d: CostDelta) -> str:
+    if d.error:
+        return "not estimated"
+    return "—" if d.pct_delta is None else f"{d.pct_delta:+,.0f}%"
 
 
 def render_terminal(report: Report) -> str:
@@ -70,8 +87,10 @@ def render_terminal(report: Report) -> str:
     regions = ", ".join(d0.regions) or "—"
     rate = next(iter(d0.regions.values()), None)
     header = f"dbt-costgate — region: {regions}"
-    if rate is not None:
-        header += f" · on-demand ${rate:,.2f}/TiB · {d0.source}"
+    if not d0.priced:
+        header += " · bytes only (no per-byte price configured)"
+    elif rate is not None:
+        header += f" · on-demand {d0.currency} {rate:,.2f}/TiB · {d0.source}"
     lines.append(header)
     lines.append("")
 
@@ -89,23 +108,31 @@ def render_terminal(report: Report) -> str:
         if d.is_incremental:
             flags.append("full-refresh")
         flag_str = f"  ({', '.join(flags)})" if flags else ""
+        cur = d0.currency
         if diff:
+            # The percentage leads in both cases; unpriced simply has no money after
+            # it. Keeps terminal and markdown reporting the same set of figures.
+            tail = f"{_pct_cell(d)}"
+            if d0.priced:
+                tail += f"   {_delta_cell(d, cur)}/run"
+                if d.usd_per_month_delta is not None:
+                    tail += (
+                        f"   {_money(d.usd_per_month_delta, cur, signed=True)}/month "
+                        f"({d.runs_per_month} runs)"
+                    )
             lines.append(
                 f"  {d.name}{flag_str}: "
                 f"{humanize_bytes(d.bytes_baseline)} → {humanize_bytes(d.bytes_current)}   "
-                f"{_delta_cell(d)}/run"
-                + (
-                    f"   {_usd(d.usd_per_month_delta, signed=True)}/month ({d.runs_per_month} runs)"
-                    if d.usd_per_month_delta is not None
-                    else ""
-                )
+                f"{tail}"
             )
+        elif not d0.priced:
+            lines.append(f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned")
         else:
-            cost = "not estimated" if d.error else f"{_usd(d.usd_current)}/run"
+            cost = "not estimated" if d.error else f"{_money(d.usd_current, cur)}/run"
             monthly = ""
             if d.usd_current is not None and d.runs_per_month:
-                month_usd = _usd(d.usd_current * d.runs_per_month)
-                monthly = f"   {month_usd}/month ({d.runs_per_month} runs)"
+                month_money = _money(d.usd_current * d.runs_per_month, cur)
+                monthly = f"   {month_money}/month ({d.runs_per_month} runs)"
             lines.append(
                 f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned   {cost}{monthly}"
             )
@@ -143,26 +170,46 @@ def render_markdown(report: Report) -> str:
         out.append(f"_{_DRYRUN_NOTE}_")
         return "\n".join(out)
 
-    if diff:
-        out.append("| Model | Baseline | This change | Δ / run | Δ / month |")
-        out.append("|---|--:|--:|--:|--:|")
+    cur = d0.currency
+    if diff and not d0.priced:
+        # Explicitly `Δ %`: a bare `Δ` would mean money in the priced shape and a
+        # percentage here, which is the same column heading meaning two things.
+        out.append("| Model | Baseline | This change | Δ % |")
+        out.append("|---|--:|--:|--:|")
+        for d in report.deltas:
+            out.append(
+                f"| {_md_name(d)} | {humanize_bytes(d.bytes_baseline)} | "
+                f"{humanize_bytes(d.bytes_current)} | {_pct_cell(d)} |"
+            )
+    elif diff:
+        # `Δ %` leads the deltas and appears in both shapes, so the unpriced table is
+        # this one minus its money columns rather than a differently-shaped table.
+        out.append("| Model | Baseline | This change | Δ % | Δ / run | Δ / month |")
+        out.append("|---|--:|--:|--:|--:|--:|")
         for d in report.deltas:
             month = (
-                _usd(d.usd_per_month_delta, signed=True)
+                _money(d.usd_per_month_delta, cur, signed=True)
                 if d.usd_per_month_delta is not None
                 else "—"
             )
             out.append(
                 f"| {_md_name(d)} | {humanize_bytes(d.bytes_baseline)} | "
-                f"{humanize_bytes(d.bytes_current)} | {_delta_cell(d)} | {month} |"
+                f"{humanize_bytes(d.bytes_current)} | {_pct_cell(d)} | "
+                f"{_delta_cell(d, cur)} | {month} |"
             )
+    elif not d0.priced:
+        out.append("| Model | Scanned |")
+        out.append("|---|--:|")
+        for d in report.deltas:
+            out.append(f"| {_md_name(d)} | {humanize_bytes(d.bytes_current)} |")
     else:
-        out.append("| Model | Scanned | $ / run | $ / month |")
+        # Column headings stay currency-neutral; every cell carries its own code.
+        out.append("| Model | Scanned | Cost / run | Cost / month |")
         out.append("|---|--:|--:|--:|")
         for d in report.deltas:
-            cost = "not estimated" if d.error else _usd(d.usd_current)
+            cost = "not estimated" if d.error else _money(d.usd_current, cur)
             month = (
-                _usd((d.usd_current or 0) * d.runs_per_month)
+                _money((d.usd_current or 0) * d.runs_per_month, cur)
                 if d.usd_current is not None and d.runs_per_month
                 else "—"
             )
@@ -218,6 +265,11 @@ def render_json(report: Report) -> str:
             "source": d0.source,
             "table_version": d0.table_version,
             "last_verified": d0.last_verified,
+            # `currency` is the ISO 4217 code the `usd_*` model fields are in. Those
+            # key names predate currency support and stay put: they are a published
+            # contract, and renaming them would break every existing consumer.
+            "currency": d0.currency,
+            "priced": d0.priced,
         },
         "models": [
             {
