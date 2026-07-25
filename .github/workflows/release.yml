@@ -46,7 +46,7 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
           /tmp/smoke/bin/dbt-costgate --version
-          got="$(/tmp/smoke/bin/python -c "import dbt_costgate; print(dbt-costgate.__version__)")"
+          got="$(/tmp/smoke/bin/python -c "import dbt_costgate; print(dbt_costgate.__version__)")"
           if [ "$got" != "$version" ]; then
             echo "Installed wheel reports version $got, expected $version."
             exit 1
