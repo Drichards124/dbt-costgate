@@ -97,6 +97,14 @@ The local mode still gates, using absolute ceilings that need no baseline —
 `--max-usd-total` and `--max-tib-total` cap a single model's total, rather than
 its increase.
 
+There is also a middle option, `dbt-costgate check --against main`, which produces
+the baseline for you by checking `main` out into a throwaway git worktree and
+compiling it there. Two things to know about it: it reuses your already-installed
+`dbt_packages/` rather than running `dbt deps`, so the baseline compiles against
+*your branch's* package versions — close enough for a cost baseline, but not a
+perfect reconstruction of `main`. And it needs both git and dbt available, which
+makes it a local convenience rather than the way to do this in CI.
+
 ---
 
 ## What it costs to run
@@ -131,6 +139,13 @@ flowchart TD
 
 **On-demand at list price.** Nothing to do. The bundled table covers 48 locations
 with published rates and states which one it applied.
+
+One thing that catches people out: **rates are not uniform within a country.**
+The `US` multi-region is USD 6.25/TiB, but `us-south1` (Dallas) is 7.50 and
+`us-west2`/`us-west3` are 8.4375. Across all locations the spread runs from 6.25
+up to 11.25 in `southamerica-east1` — so the same query costs 80% more in São
+Paulo than in Iowa. If a figure looks higher than you expected, check the region
+in the report header first; that is usually the answer.
 
 **A negotiated or Editions rate.** Set your rate and it wins over the table
 everywhere. Your override always beats the built-in numbers — that precedence is
@@ -230,11 +245,61 @@ not.
 
 Stated up front, because a cost tool that hides its error bars is worse than none.
 
-**Incremental models are priced as a full refresh.** dbt-costgate compares
-compiled SQL, and an incremental model's compiled form depends on what already
-exists in the warehouse. It uses the full-refresh form on both sides — an
-apples-to-apples comparison — and labels it `full-refresh`. So the figure is your
-rebuild cost, not your typical incremental run.
+**Incremental models are priced as a full refresh.** This is the caveat that
+surprises people most, so it's worth understanding rather than just noting.
+
+An incremental model compiles differently depending on whether its target table
+already exists. Compiled fresh, `is_incremental()` is false, so dbt emits the
+**full-refresh** query — no `{{ this }}` self-reference — which dry-runs cleanly.
+That is what dbt-costgate measures, and it labels every such row `full-refresh`.
+
+So the figure is **what it costs to rebuild that table**, not what your nightly
+incremental run costs. The true per-run cost depends on a predicate like
+`WHERE ts > (SELECT MAX(ts) ...)`, whose selectivity is unknowable before the
+query runs — BigQuery reports the worst case. dbt-costgate does not fake a number
+there; it tells you which basis it used.
+
+The diff is still the useful signal: comparing full-refresh to full-refresh is
+apples to apples, and it reliably catches the structural regressions that matter —
+a bad join, lost partition pruning, a widened scan. Just read it as rebuild cost,
+and remember an absolute `max_usd_total` ceiling on an incremental is a cap on
+rebuild cost too.
+
+**Comparing two different query shapes is refused, not fudged.** Following from
+the above: if your baseline manifest came from a production run, its incrementals
+are captured in *incremental* form while your branch's are in full-refresh form.
+Diffing those two would produce a confident, meaningless number. dbt-costgate
+detects the mismatch and flags the model instead — `mixed basis — baseline is
+incremental_form, current is full_refresh; recompile the baseline the same way`.
+Compile the baseline the way CI compiles the branch:
+
+```bash
+dbt compile --defer --state path/to/prod/artifacts --favor-state
+```
+
+**Renaming a model breaks its history.** Models are paired between baseline and
+branch by dbt identity (`unique_id`), which is tied to the `.sql` filename. Rename
+the file and the pairing is lost — the model is reported as *new* and you lose the
+before/after. Declare the pairing under `renames:` to keep it. Renaming the
+**physical table** (a dbt `alias`, `schema`, or `database`) does *not* change the
+identity, so that case needs nothing.
+
+**Percentages get silly when the baseline is tiny.** A model going from 68 MiB to
+2.91 TiB is a real and serious regression, and it reads as `+4,474,029%`. That is
+arithmetically correct and not very useful; the money column is the one to read at
+that end of the scale. Conversely a brand-new model shows `—` rather than a
+percentage, because there is nothing to take a ratio against.
+
+**Not every error is a failure.** A model whose own target table does not exist
+yet — normal in a fresh schema or on a new model — is reported as not estimated
+and deliberately does *not* fail the run. Only genuinely operational problems
+(auth, permissions, an uncompiled manifest) exit 2. And when models cannot be
+estimated, the net line says how many were left out rather than presenting a
+partial sum as a total.
+
+**Models you exclude from gating still count toward the net.** `exclude` and
+`warn_only` stop a model from *failing* the gate; they do not pretend it costs
+nothing. Its spend is real, so it is included in the net impact figure.
 
 **Monthly figures use an assumption you supply.** `run_frequency` is a number you
 configure, not something measured. If a model actually runs 90 times a month and
