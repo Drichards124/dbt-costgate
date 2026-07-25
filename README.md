@@ -66,16 +66,16 @@ gate:
 ```text
 $ dbt-costgate check --baseline path/to/main/manifest.json
 
-dbt-costgate — region: US · on-demand $6.25/TiB · built-in table
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
-  fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +$18.19/run   +$545.61/month (30 runs)
+  fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +USD 18.19/run   +USD 545.61/month (30 runs)
       ⚠ incremental — figure is the full-refresh scan
-  dim_customers  (new): — → 412.50 MiB   +$0.00/run   +$0.07/month (30 runs)
+  dim_customers  (new): — → 412.50 MiB   +USD 0.00/run   +USD 0.07/month (30 runs)
 
   GATE: FAIL
-    - fct_orders_daily: +$18.19/run exceeds $5.00
+    - fct_orders_daily: +USD 18.19/run exceeds USD 5.00
 
-  Pricing: US $6.25/TiB · built-in table (table 2026.07, verified 2026-07-23)
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 
@@ -135,11 +135,11 @@ accuracy as a feature:
 - 🧾 **Every report discloses its math** — region, rate, and rate source. Never a silent assumption:
 
   ```text
-  region: US (multi-region) · on-demand $6.25/TiB · source: built-in table 2026.07
+  region: US (multi-region) · on-demand USD 6.25/TiB · source: built-in table 2026.07
   ```
 
-- ⚙️ **Overridable** — `pricing.region` to force a region, `pricing.usd_per_tib` for negotiated or editions rates.
-- ⚠️ **Honest limits, stated up front** — under capacity/editions pricing, bytes scanned is a proxy signal, not your invoice; the 1 TiB/month free tier is not modeled by default.
+- ⚙️ **Overridable** — `pricing.region` to force a region, `pricing.usd_per_tib` for negotiated or editions rates, `pricing.currency` to label amounts in your own currency (an ISO 4217 code — dbt-costgate labels, it never converts).
+- ⚠️ **Honest limits, stated up front** — under capacity/editions pricing, bytes scanned is a proxy signal, not your invoice; set a rate of `0` and reports drop money entirely and measure bytes instead. The 1 TiB/month free tier is not modeled by default.
 
 ## Security model
 

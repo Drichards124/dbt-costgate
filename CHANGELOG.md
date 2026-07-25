@@ -8,7 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`pricing.currency` / `--currency`** — label reported amounts with an ISO 4217
+  code of your choice, e.g. `EUR`. Pair it with your own rate
+  (`pricing.usd_per_tib` or `pricing.regions`) when you are billed in something
+  other than USD.
+
+  **dbt-costgate labels; it never converts.** The setting means "the rate I gave
+  you is denominated in this", not "convert into this". Because the built-in table
+  is USD, setting a non-USD currency while any region is still priced *from that
+  table* now exits 2 with an explanation, rather than printing a USD number with
+  your label on it. The Action gains a matching `currency` input.
+
 ### Changed
+
+- **Amounts now carry an ISO 4217 code instead of a `$` symbol** —
+  `USD 6.25/TiB`, `+USD 43.75/run`, `fct_orders: +USD 43.75/run exceeds USD 10.00`.
+  `$` is also CAD, AUD and SGD, so a bare symbol was ambiguous the moment anyone
+  reported in anything but US dollars. The code appears on each amount rather than
+  once in a column header, so a single quoted row is never ambiguous; the markdown
+  cost columns are therefore now headed `Cost / run` and `Cost / month`.
+
+  If you scrape terminal or markdown output, this changes what you parse.
+  `--format json` is unaffected — its `usd_*` field names are a published contract
+  and keep their names — and it gains `pricing.currency` and `pricing.priced`.
+
+- **A rate of `0` now drops money from reports entirely.** Setting
+  `pricing.usd_per_tib: 0.00` is the documented way to run under capacity/Editions
+  (slot) pricing, where there is no per-byte price and bytes scanned is a work
+  signal rather than an invoice. Reports previously showed a column of `USD 0.00`,
+  which read as broken output. They now omit amounts and show scanned bytes plus
+  percentage growth instead, and say why in the disclosure line. No new flag or
+  config key: a zero rate already says everything needed.
 
 - **Region-aware pricing now covers 48 BigQuery locations instead of 2.** The
   built-in rate table previously held only the `US` and `EU` multi-regions, so

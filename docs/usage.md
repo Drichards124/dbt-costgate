@@ -40,15 +40,15 @@ dbt-costgate finds the models you changed versus `main` (via `git diff`) and pri
 each one's current scan cost. No baseline, no CI, no config required:
 
 ```text
-dbt-costgate — region: US · on-demand $6.25/TiB · built-in table
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
-  fct_orders_daily  (full-refresh): 2.91 TiB scanned   $18.19/run   $545.62/month (30 runs)
+  fct_orders_daily  (full-refresh): 2.91 TiB scanned   USD 18.19/run   USD 545.62/month (30 runs)
       ⚠ incremental — figure is the full-refresh scan
-  dim_customers: 412.50 MiB scanned   $2.51/run   $75.30/month (30 runs)
+  dim_customers: 411.24 GiB scanned   USD 2.51/run   USD 75.30/month (30 runs)
 
   GATE: PASS
 
-  Pricing: US $6.25/TiB · built-in table (table 2026.07, verified 2026-07-23)
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 
@@ -80,9 +80,9 @@ dbt-costgate check --baseline path/to/main/manifest.json --format markdown
 ```
 
 ```text
-  fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +$18.19/run   +$545.61/month (30 runs)
+  fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +USD 18.19/run   +USD 545.61/month (30 runs)
   GATE: FAIL
-    - fct_orders_daily: +$18.19/run exceeds $5.00
+    - fct_orders_daily: +USD 18.19/run exceeds USD 5.00
 ```
 
 Exit codes: **0** pass, **1** gate failed, **2** dbt-costgate couldn't run
@@ -261,7 +261,7 @@ jobs:
 The Action needs a Python environment (your dbt setup provides one) and compiled
 dbt artifacts. It runs `check --format markdown`; every `check` flag is an input
 (`baseline`, `config`, `select`, `base`, `fail-on`, `max-usd-per-run`, `max-pct`,
-`max-usd-per-month`, `region`, `usd-per-tib`, `project`, `threads`), plus:
+`max-usd-per-month`, `region`, `usd-per-tib`, `currency`, `project`, `threads`), plus:
 
 | Input | Default | Purpose |
 |---|---|---|
@@ -323,10 +323,21 @@ fake it; it flags it.
   exists once a job has executed. So under slots, bytes scanned is a *work* signal,
   not your invoice. Two thresholds need no rate at all and are the ones to gate
   on: **`max_tib_total`** (absolute TiB per run) and **`max_pct_increase`**
-  (growth, which has no currency). If you set `pricing.usd_per_tib: 0.00` to stop
-  reporting dollars that would not match your bill, be aware that the three USD
-  thresholds can no longer fire — by design, since you have declared there is no
-  per-byte price — so make sure at least one of the two above is set.
+  (growth, which has no currency). Set `pricing.usd_per_tib: 0.00` and reports
+  **drop money entirely** — no amount columns, no currency, just scanned bytes and
+  percentage growth — because a rate of zero means there is no per-byte price to
+  report. Note the three amount-based thresholds then cannot fire, by design, since
+  you have declared there is no per-byte price; make sure at least one of the two
+  above is set.
+- **Currency labels, never conversion.** Amounts carry an ISO 4217 code
+  (`USD 6.25/TiB`, `+EUR 43.75/run`) rather than a symbol, because `$` is also CAD,
+  AUD and SGD. Set `pricing.currency` (or `--currency`) to label amounts in your
+  own currency. **dbt-costgate does not convert between currencies** — the setting
+  says "the rate I gave you is denominated in this", not "convert into this". The
+  bundled table is USD, so a non-USD currency while any region is still priced from
+  that table is a misconfiguration and exits 2 rather than printing a USD number
+  with your label on it. Give those regions your own rates via `pricing.regions`
+  (or `pricing.usd_per_tib` for all of them).
 
 ## Configuration (`.dbt-costgate.yml`)
 
@@ -334,6 +345,7 @@ fake it; it flags it.
 pricing:
   region: europe-west3          # force a region (default: auto-detect)
   usd_per_tib: 5.00             # flat negotiated / editions override (all regions)
+  currency: EUR                 # ISO 4217 label for YOUR rates (default USD); never converts
   regions:                      # per-region rates (patch/extend the built-in table)
     europe-west3: 4.80          #   region keys match case-insensitively
     US: 6.00                    #   0.00 is valid (e.g. flat-rate slots); negative is rejected

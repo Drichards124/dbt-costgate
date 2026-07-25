@@ -46,6 +46,11 @@ class PricingTable:
     override_regions: dict[str, float] = field(default_factory=dict)
     override_usd_per_tib: float | None = None
     override_region: str | None = None
+    # ISO 4217 code the rates are denominated in. The bundled table is USD; a
+    # different code only ever describes a rate the user supplied themselves.
+    # dbt-costgate never converts between currencies — see `currency_is_sound`.
+    currency: str = "USD"
+    table_currency: str = "USD"
 
     @classmethod
     def load(
@@ -55,10 +60,12 @@ class PricingTable:
         override_regions: dict[str, float] | None = None,
         override_usd_per_tib: float | None = None,
         override_region: str | None = None,
+        currency: str | None = None,
     ) -> PricingTable:
         raw = json.loads(
             resources.files("dbt_costgate.data").joinpath("pricing.json").read_text("utf-8")
         )
+        table_currency = str(raw.get("currency") or "USD").upper()
         return cls(
             version=raw["version"],
             last_verified=raw["last_verified"],
@@ -69,6 +76,34 @@ class PricingTable:
             override_regions=override_regions or {},
             override_usd_per_tib=override_usd_per_tib,
             override_region=override_region,
+            currency=(currency or table_currency).upper(),
+            table_currency=table_currency,
+        )
+
+    def currency_is_sound(self, applied_sources: dict[str, str]) -> str | None:
+        """Reject a currency that would relabel bundled rates rather than describe
+        the user's own.
+
+        The bundled table is denominated in one currency (USD). Saying
+        `currency: EUR` while any applied rate still comes from that table — or
+        from the default fallback — would print a USD number with a EUR label,
+        which is wrong in the one direction that matters: silently. Returns an
+        explanatory message when that is happening, or None when it is not.
+
+        dbt-costgate never converts. A non-default currency means "the rate I
+        gave you is denominated in this", never "convert into this".
+        """
+        if self.currency == self.table_currency:
+            return None
+        bundled = sorted(r for r, src in applied_sources.items() if src != "user-override")
+        if not bundled:
+            return None
+        return (
+            f"pricing.currency is {self.currency} but the rate applied for "
+            f"{', '.join(bundled)} came from the built-in table, which is "
+            f"{self.table_currency}. dbt-costgate does not convert currencies. Set your "
+            f"own {self.currency} rate for those regions with pricing.regions (or "
+            f"pricing.usd_per_tib for all of them), or drop pricing.currency."
         )
 
     def rate_for(self, region: str | None) -> RateResult:
