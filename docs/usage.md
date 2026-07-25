@@ -280,7 +280,7 @@ dbt-costgate — region: US · bytes only (no per-byte price configured)
   GATE: FAIL
     - fct_orders_daily: +264% exceeds 25%
 
-  ⚠ dead-money-thresholds: thresholds.max_usd_increase_per_run cannot fire: no per-byte price is configured, so every cost on this run is 0.00 and no dollar figure can exceed a limit. Gate on scanned bytes instead with thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — this does not affect the gate or the exit code. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [dead-money-thresholds].
+  ⚠ dead-money-thresholds: thresholds.max_usd_increase_per_run cannot fire: no per-byte price is configured, so every cost on this run is 0.00 and no dollar figure can exceed a limit. Gate on scanned bytes instead with thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [dead-money-thresholds].
   Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only. Slot/capacity cost cannot be estimated before a query runs.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
