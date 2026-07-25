@@ -106,3 +106,26 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Publishing to the Marketplace is a UI action that CI cannot perform, so the
+      # best it can do is make forgetting loud at the moment it is actionable.
+      - name: Remaining manual step
+        run: |
+          {
+            echo "### One manual step left: the Marketplace listing"
+            echo ""
+            echo "The listing does **not** follow releases. It stays at whichever release"
+            echo "last had the box ticked, advertising old code with nothing reporting it."
+            echo ""
+            echo "1. Open <https://github.com/${GITHUB_REPOSITORY}/releases/edit/${GITHUB_REF_NAME}>"
+            echo "2. Tick **Publish this Action to the GitHub Marketplace**"
+            echo "3. **Update release**"
+            echo ""
+            echo "Edit the existing release — do not use the repository banner's"
+            echo "\"Draft a release\" button. That creates a *new* release, and publishing"
+            echo "it against a fresh tag fires this workflow twice into a hard failure:"
+            echo "the tag will not match __version__, and there is no CHANGELOG section"
+            echo "for it."
+            echo ""
+            echo "The **Marketplace drift** workflow fails every Monday until this is done."
+          } >> "$GITHUB_STEP_SUMMARY"
