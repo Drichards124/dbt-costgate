@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Marketplace drift
+
+# The Marketplace listing is published per-release, by hand, from the release
+# editor. It does not follow new releases: it silently stays at whichever release
+# last had the box ticked, so the listing can advertise old code indefinitely with
+# nothing anywhere reporting it. No REST API field exposes this, so the only way to
+# catch the drift is to read the listing and compare it to the latest release.
+on:
+  schedule:
+    - cron: "17 9 * * 1" # Mondays, 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Listing matches the latest release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare the Marketplace listing against the latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LISTING: https://github.com/marketplace/actions/dbt-costgate
+        run: |
+          set -euo pipefail
+
+          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+
+          # The listing page embeds its release data as JSON; that is a far more
+          # stable anchor than the rendered HTML around it.
+          listed="$(curl -sL "$LISTING" \
+            | grep -oE '"latestRelease":\{"tagName":"[^"]+"' \
+            | head -1 \
+            | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)"
+
+          if [ -z "$listed" ]; then
+            echo "::error::Could not read a version from $LISTING."
+            echo "The page structure has probably changed, so this check can no longer"
+            echo "tell a stale listing from a current one. Failing loudly rather than"
+            echo "passing silently — update the extraction in this workflow."
+            exit 1
+          fi
+
+          echo "latest release : $latest"
+          echo "marketplace    : $listed"
+
+          if [ "$latest" != "$listed" ]; then
+            echo "::error::Marketplace is stale — it lists $listed but the latest release is $latest."
+            echo "Fix it by editing the release and re-ticking the Marketplace box:"
+            echo "  https://github.com/$GITHUB_REPOSITORY/releases/edit/$latest"
+            exit 1
+          fi
+
+          echo "Listing matches the latest release."
