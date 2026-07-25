@@ -11,15 +11,15 @@ body:
     id: version
     attributes:
       label: Version and environment
-      description: costgate version, dbt / dbt-bigquery versions, Python version, and where it ran.
-      placeholder: "costgate 0.1.0, dbt-core 1.9.x, dbt-bigquery 1.9.x, Python 3.12, GitHub Actions"
+      description: dbt-costgate version, dbt / dbt-bigquery versions, Python version, and where it ran.
+      placeholder: "dbt-costgate 0.1.0, dbt-core 1.9.x, dbt-bigquery 1.9.x, Python 3.12, GitHub Actions"
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: Expected behavior
-      description: What should costgate have reported or done? If a dollar/bytes figure is wrong, what does the BigQuery console's own dry-run estimate say for the same SQL?
+      description: What should dbt-costgate have reported or done? If a dollar/bytes figure is wrong, what does the BigQuery console's own dry-run estimate say for the same SQL?
     validations:
       required: true
   - type: textarea

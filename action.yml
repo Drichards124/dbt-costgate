@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-name: costgate
+name: dbt-costgate
 description: Dry-run changed dbt models on a PR, price the diff, and post a sticky BigQuery cost comment.
 author: Dashan Richards
 branding:
   icon: dollar-sign
   color: green
 
-# --- Input ↔ `costgate check` flag map (CLAUDE.md §6 — keep in sync with cli.py) ---
+# --- Input ↔ `dbt-costgate check` flag map (CLAUDE.md §6 — keep in sync with cli.py) ---
 #   current→--current  baseline→--baseline  baseline-target→--baseline-target
 #   project-dir→--project-dir
 #   config→--config  select→--select  base→--base  fail-on→--fail-on
@@ -19,7 +19,7 @@ branding:
 #   `check --format markdown`); and `--against <ref>`, which compiles a ref in a
 #   throwaway worktree and needs full git history + dbt in the runner — a local
 #   convenience, whereas CI supplies the baseline manifest via `baseline`. Every
-#   other input defaults empty so the caller's `.costgate.yml` stays authoritative.
+#   other input defaults empty so the caller's `.dbt-costgate.yml` stays authoritative.
 inputs:
   current:
     description: Compiled dbt target dir or manifest.json for this PR.
@@ -28,13 +28,13 @@ inputs:
     description: Baseline (main, compiled the same way) manifest.json for a before/after diff.
     default: ""
   baseline-target:
-    description: Name of a baseline defined under `baselines:` in .costgate.yml (a manifest path or a git ref). A `manifest` target works in CI; an `against` target needs full git history + dbt in the runner.
+    description: Name of a baseline defined under `baselines:` in .dbt-costgate.yml (a manifest path or a git ref). A `manifest` target works in CI; an `against` target needs full git history + dbt in the runner.
     default: ""
   project-dir:
     description: Directory containing dbt_project.yml, when it can't be inferred from `current` (e.g. a monorepo subdir or a copied manifest).
     default: ""
   config:
-    description: Path to a costgate config file (default .costgate.yml).
+    description: Path to a dbt-costgate config file (default .dbt-costgate.yml).
     default: ""
   select:
     description: Comma-separated model names to estimate (overrides change detection).
@@ -43,7 +43,7 @@ inputs:
     description: Git ref to diff against for local selection (default main).
     default: ""
   fail-on:
-    description: Gate strictness — never | warn | fail. Empty defers to .costgate.yml.
+    description: Gate strictness — never | warn | fail. Empty defers to .dbt-costgate.yml.
     default: ""
   max-usd-per-run:
     description: Fail if the per-run cost increase exceeds this many USD.
@@ -84,17 +84,17 @@ inputs:
 
 outputs:
   exit-code:
-    description: "costgate exit code: 0 pass, 1 gate failed, 2 operational error."
-    value: ${{ steps.costgate.outputs.exit-code }}
+    description: "dbt-costgate exit code: 0 pass, 1 gate failed, 2 operational error."
+    value: ${{ steps.dbt-costgate.outputs.exit-code }}
   status:
     description: "Exit-class: ok (0) | failed (1) | error (2). Not the PASS/WARN/FAIL verdict — that is in the comment body."
-    value: ${{ steps.costgate.outputs.status }}
+    value: ${{ steps.dbt-costgate.outputs.status }}
 
 runs:
   using: composite
   steps:
-    - name: Run costgate and upsert the sticky cost comment
-      id: costgate
+    - name: Run dbt-costgate and upsert the sticky cost comment
+      id: dbt-costgate
       shell: bash
       env:
         CURRENT: ${{ inputs.current }}
@@ -120,20 +120,20 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         ACTION_PATH: ${{ github.action_path }}
-        MARKER: "<!-- costgate-sticky -->"
+        MARKER: "<!-- dbt-costgate-sticky -->"
       run: |
         set -eo pipefail
 
-        # 1. Install costgate from THIS action's pinned source — the exact commit
+        # 1. Install dbt-costgate from THIS action's pinned source — the exact commit
         #    the caller referenced with `uses:`. No PyPI, and no CLI/action drift.
         if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
         "$PY" -m pip install --quiet "$ACTION_PATH"
 
         # 2. Build the argv, adding each optional flag only when its input is set,
-        #    so an empty input never becomes an empty-string flag and .costgate.yml
+        #    so an empty input never becomes an empty-string flag and .dbt-costgate.yml
         #    stays authoritative. Inputs arrive via env — no GitHub expressions,
         #    and so no injection, in the script body.
-        REPORT="$RUNNER_TEMP/costgate-report.md"
+        REPORT="$RUNNER_TEMP/dbt-costgate-report.md"
         args=(check --format markdown --output "$REPORT" --current "$CURRENT")
         [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
         [ -n "$BASELINE_TARGET" ] && args+=(--baseline-target "$BASELINE_TARGET")
@@ -153,10 +153,10 @@ runs:
         [ -n "$THREADS" ] && args+=(--threads "$THREADS")
 
         # 3. Run. A nonzero gate/operational code must NOT abort the step before we
-        #    comment, so capture it. Never pipe costgate's output (pipefail).
+        #    comment, so capture it. Never pipe dbt-costgate's output (pipefail).
         code=0
-        costgate "${args[@]}" || code=$?
-        echo "costgate exited $code"
+        dbt-costgate "${args[@]}" || code=$?
+        echo "dbt-costgate exited $code"
         echo "exit-code=$code" >>"$GITHUB_OUTPUT"
         case "$code" in
           0) status=ok ;;
@@ -165,19 +165,19 @@ runs:
         esac
         echo "status=$status" >>"$GITHUB_OUTPUT"
 
-        # 4. On an operational error costgate returns before writing the report, so
+        # 4. On an operational error dbt-costgate returns before writing the report, so
         #    synthesize a short marked body. Upserting it also overwrites any stale
         #    passing report from an earlier commit that this one did not re-evaluate.
         if [ "$code" -ge 2 ] && [ ! -f "$REPORT" ]; then
-          REPORT="$RUNNER_TEMP/costgate-error.md"
+          REPORT="$RUNNER_TEMP/dbt-costgate-error.md"
           {
             printf '%s\n\n' "$MARKER"
-            printf '### ⚠️ costgate could not run\n\n'
+            printf '### ⚠️ dbt-costgate could not run\n\n'
             printf 'An operational error (exit %s) — e.g. missing GCP credentials or an ' "$code"
             printf 'uncompiled manifest — prevented the cost check. See the Action run logs. '
             printf 'This gate is alert-only for this run.\n'
           } >"$REPORT"
-          echo "::warning::costgate could not run (exit $code); see logs."
+          echo "::warning::dbt-costgate could not run (exit $code); see logs."
         fi
 
         # 5. Upsert the sticky — only on same-repo pull requests. Fork PRs and
@@ -186,14 +186,14 @@ runs:
         if [ "$COMMENT" = "true" ]; then
           if [ -n "$PR_NUMBER" ] && [ "$IS_FORK" != "true" ]; then
             if ! bash "$ACTION_PATH/scripts/sticky_comment.sh" "$PR_NUMBER" "$MARKER" "$REPORT"; then
-              echo "::warning::costgate could not post the PR comment (continuing)."
+              echo "::warning::dbt-costgate could not post the PR comment (continuing)."
             fi
           else
-            echo "::warning::Skipping costgate PR comment: read-only token on a fork PR or a non-PR event."
+            echo "::warning::Skipping dbt-costgate PR comment: read-only token on a fork PR or a non-PR event."
           fi
         fi
 
-        # 6. Propagate costgate's verdict as the job's fate: gate failure blocks;
+        # 6. Propagate dbt-costgate's verdict as the job's fate: gate failure blocks;
         #    an operational error is alert-only unless fail-on-operational is set.
         if [ "$code" -eq 1 ]; then
           exit 1

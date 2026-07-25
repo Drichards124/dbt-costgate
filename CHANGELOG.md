@@ -1,12 +1,32 @@
 # Changelog
 
-All notable, user-visible changes to `costgate` are documented here.
+All notable, user-visible changes to `dbt-costgate` are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
 ## [Unreleased]
+
+### Changed
+
+- **Renamed from `costgate` to `dbt-costgate`.** The name `costgate` is taken on
+  PyPI by an unrelated project, so `pip install costgate` would have installed
+  someone else's package. Everything follows the new name:
+
+  | | before | after |
+  |---|---|---|
+  | command | `costgate check` | `dbt-costgate check` |
+  | config file | `.costgate.yml` | `.dbt-costgate.yml` |
+  | Action | `Drichards124/costgate@v` | `Drichards124/dbt-costgate@v` |
+  | import | `costgate` | `dbt_costgate` |
+
+  To migrate: rename your config file, update the `uses:` line in any workflow,
+  and reinstall. Flags, config keys, report format, and exit codes are unchanged.
+  The old repository URL redirects permanently, so existing clones keep working.
+
+  Releases v0.1.0–v0.6.0 shipped under the old name and their changelog entries
+  below are left as-is, as a record of what actually shipped.
 
 ## [0.6.0] - 2026-07-24
 

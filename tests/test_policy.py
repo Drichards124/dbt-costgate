@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-from costgate import policy
-from costgate.config import Config, Thresholds
-from costgate.models import TIB, CostDelta, Status
+from dbt_costgate import policy
+from dbt_costgate.config import Config, Thresholds
+from dbt_costgate.models import TIB, CostDelta, Status
 
 
 def _delta(name="m", usd_baseline=1.0, usd_current=10.0, gateable=True, runs=30, bytes_current=10):

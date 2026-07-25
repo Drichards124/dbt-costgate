@@ -5,7 +5,7 @@
 The README carries the user-facing story and [usage.md](usage.md) the how-to;
 this document is the engineering shape and its invariants.
 
-## Modules (`src/costgate/`)
+## Modules (`src/dbt_costgate/`)
 
 A **pure core** plus two side-effecting edges. Everything except `bigquery.py`
 (network) and `gitdiff.py` (a git subprocess) is pure Python over dataclasses,
@@ -14,7 +14,7 @@ so the pipeline is unit-tested end to end without a warehouse or credentials.
 | Module | Responsibility | Edge? |
 |---|---|---|
 | `cli.py` | argparse `check`, wire the pipeline, own the exit codes | — |
-| `config.py` | load `.costgate.yml`, merge CLI overrides (CLI wins) | — |
+| `config.py` | load `.dbt-costgate.yml`, merge CLI overrides (CLI wins) | — |
 | `artifacts.py` | load manifest, filter to cost-bearing models, resolve compiled SQL, change detection (body checksum, compiled SQL, macro/patch paths), basis + warning heuristics | — |
 | `gitdiff.py` | changed paths via `git diff` (git only, no dbt) | git |
 | `pricing.py` + `data/pricing.json` | region → $/TiB with disclosed source | — |

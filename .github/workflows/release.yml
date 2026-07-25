@@ -23,7 +23,7 @@ jobs:
       - name: Verify tag matches package version
         run: |
           version="${GITHUB_REF_NAME#v}"
-          pkg="$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/costgate/__init__.py').read_text()).group(1))")"
+          pkg="$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/dbt_costgate/__init__.py').read_text()).group(1))")"
           if [ "$version" != "$pkg" ]; then
             echo "Tag $GITHUB_REF_NAME (version $version) does not match package version $pkg."
             exit 1
@@ -45,8 +45,8 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
-          /tmp/smoke/bin/costgate --version
-          got="$(/tmp/smoke/bin/python -c "import costgate; print(costgate.__version__)")"
+          /tmp/smoke/bin/dbt-costgate --version
+          got="$(/tmp/smoke/bin/python -c "import dbt_costgate; print(dbt-costgate.__version__)")"
           if [ "$got" != "$version" ]; then
             echo "Installed wheel reports version $got, expected $version."
             exit 1
@@ -68,5 +68,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "costgate $GITHUB_REF_NAME" \
+            --title "dbt-costgate $GITHUB_REF_NAME" \
             --notes-file RELEASE_NOTES.md

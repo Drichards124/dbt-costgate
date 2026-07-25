@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sticky_comment.sh"
-MARKER = "<!-- costgate-sticky -->"
+MARKER = "<!-- dbt-costgate-sticky -->"
 
 # A fake `gh`: the list call (recognised by `--jq`) prints $FAKE_GH_IDS; a
 # POST/PATCH records one tab-separated line per call to $FAKE_GH_LOG.
@@ -48,7 +48,7 @@ fi
 len=0; marker=no
 if [ -n "$body" ] && [ -f "$body" ]; then
   len=$(wc -c <"$body" | tr -d '[:space:]')
-  grep -qF '<!-- costgate-sticky -->' "$body" && marker=yes
+  grep -qF '<!-- dbt-costgate-sticky -->' "$body" && marker=yes
 fi
 printf '%s\t%s\tlen=%s\tmarker=%s\n' "$method" "$url" "$len" "$marker" >>"$FAKE_GH_LOG"
 exit 0
@@ -86,7 +86,7 @@ def run(tmp_path: Path, *, ids: str, body: str) -> list[str]:
 
 
 def test_posts_when_no_existing_comment(tmp_path: Path):
-    lines = run(tmp_path, ids="", body="### costgate\ncost table")
+    lines = run(tmp_path, ids="", body="### dbt-costgate\ncost table")
     assert len(lines) == 1
     method, url, *_rest = lines[0].split("\t")
     assert method == "POST"
@@ -96,7 +96,7 @@ def test_posts_when_no_existing_comment(tmp_path: Path):
 
 
 def test_patches_when_marker_present(tmp_path: Path):
-    lines = run(tmp_path, ids="456", body="### costgate\ncost table")
+    lines = run(tmp_path, ids="456", body="### dbt-costgate\ncost table")
     assert len(lines) == 1
     method, url, *_rest = lines[0].split("\t")
     assert method == "PATCH"
@@ -106,7 +106,7 @@ def test_patches_when_marker_present(tmp_path: Path):
 def test_takes_first_id_when_paginated_match_is_multiline(tmp_path: Path):
     # --paginate evaluates --jq per page, so a page-2 match (or a duplicate) can
     # yield several ids. The script must PATCH exactly the first, never twice.
-    lines = run(tmp_path, ids="456\n789", body="### costgate\ncost table")
+    lines = run(tmp_path, ids="456\n789", body="### dbt-costgate\ncost table")
     assert len(lines) == 1
     method, url, *_rest = lines[0].split("\t")
     assert method == "PATCH"

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Scaffold smoke tests: the package imports and the CLI stub answers."""
 
-from costgate import __version__
-from costgate.cli import build_parser, main
+from dbt_costgate import __version__
+from dbt_costgate.cli import build_parser, main
 
 
 def test_version_is_three_part_semver():

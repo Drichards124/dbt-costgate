@@ -7,8 +7,8 @@ or user-excluded models are reported but never cause a failure.
 
 from __future__ import annotations
 
-from costgate.config import Config, Thresholds
-from costgate.models import TIB, CostDelta, Status, Verdict
+from dbt_costgate.config import Config, Thresholds
+from dbt_costgate.models import TIB, CostDelta, Status, Verdict
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1

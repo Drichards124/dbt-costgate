@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`costgate` is pre-1.0. Security fixes are applied to the latest released
+`dbt-costgate` is pre-1.0. Security fixes are applied to the latest released
 `0.x` minor version. Once `1.0` ships, this policy will name a support window.
 
 ## Reporting a vulnerability
@@ -22,13 +22,13 @@ the release notes unless you ask otherwise.
 
 ## Scope
 
-`costgate` runs in CI next to warehouse credentials, so we treat its attack
+`dbt-costgate` runs in CI next to warehouse credentials, so we treat its attack
 surface seriously. By design:
 
 - The only warehouse interaction is BigQuery **dry-run** jobs (`dryRun=true`) —
-  free, nothing executed, no table data read. Any way to make costgate issue a
+  free, nothing executed, no table data read. Any way to make dbt-costgate issue a
   billable or data-reading query is a vulnerability; please report it.
-- costgate never accepts, stores, or logs credentials. Authentication is
+- dbt-costgate never accepts, stores, or logs credentials. Authentication is
   delegated to Google's Application Default Credentials chain. Any code path
   that surfaces a token or key material is a vulnerability.
 - Reports (PR comments, terminal output, JSON) intentionally exclude compiled

@@ -9,11 +9,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from costgate import artifacts
-from costgate.bigquery import DryRunner
-from costgate.config import Config
-from costgate.models import CostDelta, ModelEstimate, ModelNode
-from costgate.pricing import PricingTable
+from dbt_costgate import artifacts
+from dbt_costgate.bigquery import DryRunner
+from dbt_costgate.config import Config
+from dbt_costgate.models import CostDelta, ModelEstimate, ModelNode
+from dbt_costgate.pricing import PricingTable
 
 
 def estimate_models(
@@ -162,7 +162,7 @@ def build_deltas(
 
 
 def _not_estimated_reason(est: ModelEstimate) -> str:
-    from costgate.models import ErrorKind
+    from dbt_costgate.models import ErrorKind
 
     if est.error_kind == ErrorKind.DESTINATION_MISSING:
         return (

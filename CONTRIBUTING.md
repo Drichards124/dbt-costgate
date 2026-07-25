@@ -1,16 +1,16 @@
-# Contributing to costgate
+# Contributing to dbt-costgate
 
-Thanks for your interest in improving `costgate`. This document covers the
+Thanks for your interest in improving `dbt-costgate`. This document covers the
 Developer Certificate of Origin (which every commit must satisfy), the local
 development setup, and how a change reaches a release.
 
 ## Ground rules
 
-- **The gate never runs billable queries.** costgate's only warehouse
+- **The gate never runs billable queries.** dbt-costgate's only warehouse
   interaction is BigQuery dry-run jobs (`dryRun=true`), which are free and
   execute nothing. A change that issues any other query type needs an issue
   and a design discussion first.
-- **costgate never touches credentials.** Authentication is delegated
+- **dbt-costgate never touches credentials.** Authentication is delegated
   entirely to Google's Application Default Credentials chain. Do not add
   credential flags, token parameters, or secret handling of any kind.
 - **No telemetry, no phone-home.** The only network endpoint this tool talks
@@ -18,7 +18,7 @@ development setup, and how a change reaches a release.
   Catalog API for live pricing).
 - **Dollar figures must be traceable.** Every reported cost states the
   region, the rate applied, and where that rate came from. Changes to the
-  pricing table (`src/costgate/data/`) must cite Google's published pricing
+  pricing table (`src/dbt_costgate/data/`) must cite Google's published pricing
   page and update the table's `last_verified` date.
 
 ## Developer Certificate of Origin (DCO)
@@ -52,8 +52,8 @@ git rebase --signoff main
 Prerequisites: **Python ≥ 3.9**.
 
 ```bash
-git clone https://github.com/Drichards124/costgate.git
-cd costgate
+git clone https://github.com/Drichards124/dbt-costgate.git
+cd dbt-costgate
 python -m pip install -e ".[dev]"
 ```
 

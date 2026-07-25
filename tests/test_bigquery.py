@@ -2,8 +2,8 @@
 """Categorization is pure and testable with stand-in exceptions that mimic the
 google client's type names and messages — no real client required."""
 
-from costgate.bigquery import DryRunResult, categorize
-from costgate.models import ErrorKind
+from dbt_costgate.bigquery import DryRunResult, categorize
+from dbt_costgate.models import ErrorKind
 
 
 class NotFound(Exception):

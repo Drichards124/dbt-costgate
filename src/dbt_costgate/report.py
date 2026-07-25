@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from costgate.models import CostDelta, PricingDisclosure, Report, Status
+from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
 
@@ -69,7 +69,7 @@ def render_terminal(report: Report) -> str:
     d0 = report.disclosure
     regions = ", ".join(d0.regions) or "—"
     rate = next(iter(d0.regions.values()), None)
-    header = f"costgate — region: {regions}"
+    header = f"dbt-costgate — region: {regions}"
     if rate is not None:
         header += f" · on-demand ${rate:,.2f}/TiB · {d0.source}"
     lines.append(header)
@@ -134,7 +134,8 @@ def render_markdown(report: Report) -> str:
     diff = report.mode == "diff"
     out: list[str] = []
     n = len(report.deltas)
-    out.append(f"### 💸 costgate — cost impact of this change ({n} model{'s' if n != 1 else ''})")
+    plural = "s" if n != 1 else ""
+    out.append(f"### 💸 dbt-costgate — cost impact of this change ({n} model{plural})")
     out.append("")
     if not report.deltas:
         out.append("_No changed models to estimate._")

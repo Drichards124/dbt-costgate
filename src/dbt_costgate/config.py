@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`.costgate.yml` loading and merge with CLI overrides (CLI always wins)."""
+"""`.dbt-costgate.yml` loading and merge with CLI overrides (CLI always wins)."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class Config:
     report_format: str = "terminal"
     fail_on: str = "fail"  # never | warn | fail
 
-    DEFAULT_FILENAMES = (".costgate.yml", ".costgate.yaml", "costgate.yml")
+    DEFAULT_FILENAMES = (".dbt-costgate.yml", ".dbt-costgate.yaml", "dbt-costgate.yml")
 
     @classmethod
     def load(cls, path: Path | None, project_dir: Path) -> Config:
@@ -142,8 +142,8 @@ def _opt_int(v) -> int | None:
 
 @dataclass(frozen=True)
 class ConfigField:
-    """One documented `.costgate.yml` key. The single source of truth behind the
-    `costgate config` command; `attr` ties it to the Config attribute it fills so
+    """One documented `.dbt-costgate.yml` key. The single source of truth behind the
+    `dbt-costgate config` command; `attr` ties it to the Config attribute it fills so
     a test can prove the registry and the parser never drift apart."""
 
     key: str  # dotted YAML path, e.g. "pricing.regions"
@@ -271,7 +271,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "str",
         None,
         "Name of the `baselines:` entry to use when no --baseline/--against/"
-        "--baseline-target is given, so `costgate check` diffs without a flag.",
+        "--baseline-target is given, so `dbt-costgate check` diffs without a flag.",
     ),
     ConfigField(
         "report.format",

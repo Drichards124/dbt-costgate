@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from importlib import resources
 
-from costgate.models import TIB
+from dbt_costgate.models import TIB
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class PricingTable:
         override_region: str | None = None,
     ) -> PricingTable:
         raw = json.loads(
-            resources.files("costgate.data").joinpath("pricing.json").read_text("utf-8")
+            resources.files("dbt_costgate.data").joinpath("pricing.json").read_text("utf-8")
         )
         return cls(
             version=raw["version"],
