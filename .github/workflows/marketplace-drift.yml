@@ -44,11 +44,15 @@ jobs:
 
           # The listing page embeds its release data as JSON; that is a far more
           # stable anchor than the rendered HTML around it. `[^]]*` is safe because
-          # the array holds flat objects with no nested brackets.
+          # the array holds flat objects with no nested brackets. Pull the value out
+          # of `tagName` specifically: a bare version regex also matches the version
+          # inside each release's *name*, so a release tagged v0.7.1 but titled
+          # "... v0.8.0" would satisfy the membership test while publishing neither.
           published="$(curl -sL "$LISTING" \
             | grep -oE '"releases":\[[^]]*\]' \
             | head -1 \
-            | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)"
+            | grep -oE '"tagName":"[^"]+"' \
+            | sed -E 's/.*:"([^"]+)"/\1/' || true)"
 
           if [ -z "$published" ]; then
             echo "::error::Could not read any published version from $LISTING."
