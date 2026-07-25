@@ -1,8 +1,8 @@
-costgate
+dbt-costgate
 Copyright 2026 Dashan Richards
 
 This product includes software developed by Dashan Richards and the
-costgate contributors.
+dbt-costgate contributors.
 
 Licensed under the Apache License, Version 2.0. See the LICENSE file for the
 full license text.
@@ -10,7 +10,7 @@ full license text.
 --------------------------------------------------------------------------------
 Third-party services and data
 --------------------------------------------------------------------------------
-costgate estimates BigQuery query costs exclusively via Google Cloud's
+dbt-costgate estimates BigQuery query costs exclusively via Google Cloud's
 BigQuery API using dry-run jobs. It does not bundle or redistribute any
 Google Cloud software, SDK data, or proprietary datasets.
 
@@ -21,5 +21,5 @@ date. Prices are facts, not copyrightable expression; the table is maintained
 on a best-effort basis and is not a substitute for Google's official pricing.
 
 "Google Cloud" and "BigQuery" are trademarks of Google LLC. "dbt" is a
-trademark of dbt Labs, Inc. costgate is an independent project and is not
+trademark of dbt Labs, Inc. dbt-costgate is an independent project and is not
 affiliated with, sponsored by, or endorsed by Google LLC or dbt Labs, Inc.

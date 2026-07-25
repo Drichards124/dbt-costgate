@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from costgate.models import EstimateBasis, ModelNode
+from dbt_costgate.models import EstimateBasis, ModelNode
 
 # Statically-unknowable filters make a BigQuery dry-run fall back to a full-table
 # scan (see docs/architecture.md). We can't correct the number, only flag it.
@@ -24,7 +24,7 @@ _MULTI_STATEMENT = re.compile(r"\b(declare|begin)\b", re.IGNORECASE)
 
 
 class ArtifactError(Exception):
-    """A manifest could not be read or is missing information costgate needs."""
+    """A manifest could not be read or is missing information dbt-costgate needs."""
 
 
 def manifest_path(path: Path) -> Path:

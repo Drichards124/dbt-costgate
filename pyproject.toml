@@ -4,7 +4,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "costgate"
+name = "dbt-costgate"
 dynamic = ["version"]
 description = "BigQuery cost gate for dbt pull requests: dry-run changed models, diff the bytes, price the damage before it merges."
 readme = "README.md"
@@ -26,22 +26,22 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Drichards124/costgate"
-Repository = "https://github.com/Drichards124/costgate"
-Issues = "https://github.com/Drichards124/costgate/issues"
-Changelog = "https://github.com/Drichards124/costgate/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Drichards124/dbt-costgate"
+Repository = "https://github.com/Drichards124/dbt-costgate"
+Issues = "https://github.com/Drichards124/dbt-costgate/issues"
+Changelog = "https://github.com/Drichards124/dbt-costgate/blob/main/CHANGELOG.md"
 
 [project.scripts]
-costgate = "costgate.cli:main"
+dbt-costgate = "dbt_costgate.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.6"]
 
 [tool.hatch.version]
-path = "src/costgate/__init__.py"
+path = "src/dbt_costgate/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/costgate"]
+packages = ["src/dbt_costgate"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

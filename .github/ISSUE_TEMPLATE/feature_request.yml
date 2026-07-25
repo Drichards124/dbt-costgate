@@ -6,14 +6,14 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What cost-visibility problem are you hitting that costgate doesn't solve today?
+      description: What cost-visibility problem are you hitting that dbt-costgate doesn't solve today?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like costgate to do? If it affects reported dollars, say how the figure should be derived.
+      description: What would you like dbt-costgate to do? If it affects reported dollars, say how the figure should be derived.
     validations:
       required: true
   - type: textarea

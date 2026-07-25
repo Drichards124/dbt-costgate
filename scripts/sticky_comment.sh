@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Upsert a single "sticky" costgate comment on a pull request, using only the gh
-# CLI (no third-party action). A hidden marker identifies costgate's own comment,
+# Upsert a single "sticky" dbt-costgate comment on a pull request, using only the gh
+# CLI (no third-party action). A hidden marker identifies dbt-costgate's own comment,
 # so repeated runs edit that one comment instead of stacking new ones.
 #
 # Usage: sticky_comment.sh <pr-number> <marker> <body-file>
@@ -37,7 +37,7 @@ if [ "$(wc -c <"$send")" -gt "$MAX" ]; then
   mv "$trunc" "$send"
 fi
 
-# Find costgate's existing sticky, if any. --paginate evaluates --jq per page, so
+# Find dbt-costgate's existing sticky, if any. --paginate evaluates --jq per page, so
 # a match on a later page (or a stray duplicate) can emit several ids; take the
 # first. pipefail is relaxed here so head closing the pipe early is not an error.
 set +o pipefail
@@ -48,8 +48,8 @@ set -o pipefail
 
 if [ -n "$id" ]; then
   gh api --method PATCH "repos/${REPO}/issues/comments/${id}" -F body=@"$send" >/dev/null
-  echo "costgate: updated sticky comment ${id}"
+  echo "dbt-costgate: updated sticky comment ${id}"
 else
   gh api --method POST "repos/${REPO}/issues/${PR}/comments" -F body=@"$send" >/dev/null
-  echo "costgate: posted a new sticky comment"
+  echo "dbt-costgate: posted a new sticky comment"
 fi

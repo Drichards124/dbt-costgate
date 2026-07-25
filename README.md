@@ -1,20 +1,21 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" alt="costgate logo" width="96" height="96"/>
+<img src="docs/assets/logo.svg" alt="dbt-costgate logo" width="96" height="96"/>
 
-# costgate
+# dbt-costgate
 
 **The BigQuery cost gate for dbt pull requests.**
 
 Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before* it merges — not on next month's bill.
 
-[![CI](https://github.com/Drichards124/costgate/actions/workflows/ci.yml/badge.svg)](https://github.com/Drichards124/costgate/actions/workflows/ci.yml)
-[![PLE](https://github.com/Drichards124/costgate/actions/workflows/ple.yml/badge.svg)](https://github.com/Drichards124/costgate/actions/workflows/ple.yml)
+[![CI](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml)
+[![PLE](https://github.com/Drichards124/dbt-costgate/actions/workflows/ple.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ple.yml)
 [![Python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://docs.astral.sh/ruff/)
 [![Status](https://img.shields.io/badge/status-MVP-brightgreen)](#roadmap)
 
+[Quick start](#quick-start) ·
 [How it works](#how-it-works) ·
 [What you get](#what-you-get-on-every-pr) ·
 [Where it fits](#where-it-fits) ·
@@ -26,9 +27,9 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 </div>
 
 > [!NOTE]
-> **Working MVP.** `costgate check` and the **GitHub Action** are implemented and
+> **Working MVP.** `dbt-costgate check` and the **GitHub Action** are implemented and
 > tested. The PR-comment image below is an illustrative mock of the comment's
-> design; the terminal output further down is **real** costgate output. See the
+> design; the terminal output further down is **real** dbt-costgate output. See the
 > [usage guide](docs/usage.md) and [changelog](CHANGELOG.md).
 
 ---
@@ -41,12 +42,12 @@ window can multiply a model's bytes scanned — and the team finds out days late
 on the bill, or when finance escalates.
 
 BigQuery's dry-run API returns the *exact* bytes a query would scan — **for
-free, before running anything**. costgate packages that into a first-class PR
+free, before running anything**. dbt-costgate packages that into a first-class PR
 gate:
 
 <div align="center">
 
-![How costgate works: pull request → compile both versions → BigQuery dry-run → price the diff → gate](docs/assets/flow.svg)
+![How dbt-costgate works: pull request → compile both versions → BigQuery dry-run → price the diff → gate](docs/assets/flow.svg)
 
 </div>
 
@@ -54,7 +55,7 @@ gate:
 
 <div align="center">
 
-![Illustrative mock of the costgate PR comment: a per-model cost-diff table with a failing gate verdict](docs/assets/pr-comment-mock.svg)
+![Illustrative mock of the dbt-costgate PR comment: a per-model cost-diff table with a failing gate verdict](docs/assets/pr-comment-mock.svg)
 
 </div>
 
@@ -63,9 +64,9 @@ gate:
 <br/>
 
 ```text
-$ costgate check --baseline path/to/main/manifest.json
+$ dbt-costgate check --baseline path/to/main/manifest.json
 
-costgate — region: US · on-demand $6.25/TiB · built-in table
+dbt-costgate — region: US · on-demand $6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 68.20 MiB → 2.91 TiB   +$18.19/run   +$545.61/month (30 runs)
       ⚠ incremental — figure is the full-refresh scan
@@ -81,10 +82,27 @@ costgate — region: US · on-demand $6.25/TiB · built-in table
 Or run it with no baseline at all for an instant local read of what your changed
 models scan — and fail the run there on an absolute `--max-usd-total` /
 `--max-tib-total` ceiling (no baseline required) — or get the full before/after
-locally in one command with `costgate check --against main` (costgate compiles
+locally in one command with `dbt-costgate check --against main` (dbt-costgate compiles
 `main` for you in a throwaway worktree). See the [usage guide](docs/usage.md).
 
 </details>
+
+## Quick start
+
+```bash
+pip install git+https://github.com/Drichards124/dbt-costgate@v0.7.0
+gcloud auth application-default login
+
+dbt compile
+dbt-costgate check
+```
+
+That's the entire local setup — no baseline, no CI, no config file. Add a
+baseline and thresholds when you want it to *block* a PR; see the
+[usage guide](docs/usage.md).
+
+Not on PyPI yet — every [release](https://github.com/Drichards124/dbt-costgate/releases)
+also ships a wheel, an sdist, and `SHA256SUMS`.
 
 ## How it works
 
@@ -98,19 +116,19 @@ locally in one command with `costgate check --against main` (costgate compiles
 
 ## Where it fits
 
-costgate is the **preventive** half of BigQuery cost control — it deliberately
+dbt-costgate is the **preventive** half of BigQuery cost control — it deliberately
 does not compete with the excellent retrospective tools:
 
 | The question you're asking | Reach for |
 |---|---|
 | "What *did* our warehouse cost, by model / user / query?" | [dbt-bigquery-monitoring](https://github.com/bqbooster/dbt-bigquery-monitoring) |
 | "What does the dbt platform estimate my models cost?" | [dbt Cost Insights](https://docs.getdbt.com/docs/explore/cost-insights) |
-| "What is **this PR about to do** to our bill?" | **costgate** |
+| "What is **this PR about to do** to our bill?" | **dbt-costgate** |
 
 ## Accurate, transparent pricing
 
 BigQuery on-demand rates differ by region — a gate that prices every byte at
-the US rate is silently wrong for half the world. costgate treats pricing
+the US rate is silently wrong for half the world. dbt-costgate treats pricing
 accuracy as a feature:
 
 - 🌍 **Versioned per-region pricing table** with a `last_verified` date, auto-selected from your job's detected region.
@@ -141,20 +159,19 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 
 ## Roadmap
 
-- [x] **`costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
-- [x] **One-command local diff** — `costgate check --against main` (isolated git worktree)
+- [x] **`dbt-costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
+- [x] **One-command local diff** — `dbt-costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
 - [x] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
 - [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 - [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API
-- [ ] **Production actuals** — real per-run scan bytes from `INFORMATION_SCHEMA.JOBS`
 
 ## Non-goals
 
 - **Not a monitoring tool** — retrospective observability belongs to [dbt-bigquery-monitoring](https://github.com/bqbooster/dbt-bigquery-monitoring).
-- **BigQuery only** — one warehouse done accurately beats three done approximately.
+- **BigQuery first** — one warehouse done accurately beats three done approximately. Other warehouses come only once BigQuery is genuinely finished, and only where the cost model actually transfers.
 - **Never runs billable queries** — features that require executing real queries are out of scope by design.
 - **No IDE/editor integration** (for now).
 

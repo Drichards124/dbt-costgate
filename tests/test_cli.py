@@ -14,9 +14,9 @@ from conftest import (
     make_node,
     write_target,
 )
-from costgate.cli import _resolve_baseline, _UsageError, main
-from costgate.config import BaselineTarget, Config
-from costgate.models import TIB, ErrorKind
+from dbt_costgate.cli import _resolve_baseline, _UsageError, main
+from dbt_costgate.config import BaselineTarget, Config
+from dbt_costgate.models import TIB, ErrorKind
 
 
 def _target(tmp_path: Path, *specs):
@@ -96,7 +96,7 @@ def test_rename_map_produces_a_diff_across_a_model_rename(tmp_path: Path, capsys
     baseline = _write_baseline(
         tmp_path, make_node("fct_orders_monthly", compiled_code="BASE_monthly", checksum="o")
     )
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         "renames:\n  fct_orders_daily: fct_orders_monthly\n", "utf-8"
     )
     runner = FakeDryRunner({"CUR_daily": 3 * TIB, "BASE_monthly": TIB})
@@ -108,7 +108,7 @@ def test_rename_map_produces_a_diff_across_a_model_rename(tmp_path: Path, capsys
             "--baseline",
             str(baseline),
             "--config",
-            str(tmp_path / ".costgate.yml"),
+            str(tmp_path / ".dbt-costgate.yml"),
         ],
         runner=runner,
     )
@@ -121,7 +121,9 @@ def test_rename_map_produces_a_diff_across_a_model_rename(tmp_path: Path, capsys
 def test_misconfigured_rename_exits_operational(tmp_path: Path, capsys):
     target = _target(tmp_path, make_node("fct_orders_daily", compiled_code="CUR_daily"))
     baseline = _write_baseline(tmp_path, make_node("fct_orders_monthly", compiled_code="BASE_m"))
-    (tmp_path / ".costgate.yml").write_text("renames:\n  fct_orders_daily: ghost_model\n", "utf-8")
+    (tmp_path / ".dbt-costgate.yml").write_text(
+        "renames:\n  fct_orders_daily: ghost_model\n", "utf-8"
+    )
     runner = FakeDryRunner({"CUR_daily": TIB})
     code = main(
         [
@@ -131,7 +133,7 @@ def test_misconfigured_rename_exits_operational(tmp_path: Path, capsys):
             "--baseline",
             str(baseline),
             "--config",
-            str(tmp_path / ".costgate.yml"),
+            str(tmp_path / ".dbt-costgate.yml"),
         ],
         runner=runner,
     )
@@ -175,7 +177,7 @@ def test_resolve_baseline_rejects_misuse():
 def test_baseline_target_manifest_produces_diff(tmp_path: Path, capsys):
     target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="n"))
     base = _write_baseline(tmp_path, make_node("m", compiled_code="BASE_m", checksum="o"))
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         f'baselines:\n  ple:\n    manifest: "{base.as_posix()}"\n', "utf-8"
     )
     runner = FakeDryRunner({"CUR_m": 3 * TIB, "BASE_m": TIB})
@@ -187,7 +189,7 @@ def test_baseline_target_manifest_produces_diff(tmp_path: Path, capsys):
             "--baseline-target",
             "ple",
             "--config",
-            str(tmp_path / ".costgate.yml"),
+            str(tmp_path / ".dbt-costgate.yml"),
         ],
         runner=runner,
     )
@@ -199,12 +201,12 @@ def test_baseline_target_manifest_produces_diff(tmp_path: Path, capsys):
 def test_default_baseline_used_without_any_flag(tmp_path: Path, capsys):
     target = _target(tmp_path, make_node("m", compiled_code="CUR_m", checksum="n"))
     base = _write_baseline(tmp_path, make_node("m", compiled_code="BASE_m", checksum="o"))
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         f'baselines:\n  main:\n    manifest: "{base.as_posix()}"\ndefault_baseline: main\n', "utf-8"
     )
     runner = FakeDryRunner({"CUR_m": 2 * TIB, "BASE_m": TIB})
     code = main(
-        ["check", "--current", str(target), "--config", str(tmp_path / ".costgate.yml")],
+        ["check", "--current", str(target), "--config", str(tmp_path / ".dbt-costgate.yml")],
         runner=runner,
     )
     out = capsys.readouterr().out
@@ -214,7 +216,7 @@ def test_default_baseline_used_without_any_flag(tmp_path: Path, capsys):
 
 def test_unknown_baseline_target_exits_2(tmp_path: Path, capsys):
     target = _target(tmp_path, make_node("m", compiled_code="CUR_m"))
-    (tmp_path / ".costgate.yml").write_text("baselines:\n  main:\n    against: main\n", "utf-8")
+    (tmp_path / ".dbt-costgate.yml").write_text("baselines:\n  main:\n    against: main\n", "utf-8")
     code = main(
         [
             "check",
@@ -223,7 +225,7 @@ def test_unknown_baseline_target_exits_2(tmp_path: Path, capsys):
             "--baseline-target",
             "ghost",
             "--config",
-            str(tmp_path / ".costgate.yml"),
+            str(tmp_path / ".dbt-costgate.yml"),
         ],
         runner=FakeDryRunner({"CUR_m": TIB}),
     )

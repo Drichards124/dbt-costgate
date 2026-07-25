@@ -1,4 +1,4 @@
-<svg viewBox="0 0 740 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illustrative mock of the costgate PR comment: a cost-diff table per model with a failing gate verdict">
+<svg viewBox="0 0 740 350" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illustrative mock of the dbt-costgate PR comment: a cost-diff table per model with a failing gate verdict">
   <style>
     .sans { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -16,11 +16,11 @@
   <path d="M1 9 a8 8 0 0 1 8 -8 h722 a8 8 0 0 1 8 8 v39 h-738 z" fill="#f6f8fa"/>
   <line x1="1" y1="48" x2="739" y2="48" stroke="#d0d7de"/>
   <circle cx="28" cy="24" r="12" fill="#1a7f37"/>
-  <text class="mono" x="28" y="28" font-size="10" fill="#ffffff" text-anchor="middle">cg</text>
-  <text class="sans strong" x="48" y="28" font-size="13">costgate</text>
-  <rect x="112" y="15" width="30" height="17" rx="8.5" fill="none" stroke="#d0d7de"/>
-  <text class="sans muted" x="127" y="27" font-size="10" text-anchor="middle">bot</text>
-  <text class="sans muted" x="150" y="28" font-size="12">commented 1 minute ago</text>
+  <text class="mono" x="28" y="28" font-size="10" fill="#ffffff" text-anchor="middle">dc</text>
+  <text class="sans strong" x="48" y="28" font-size="13">dbt-costgate</text>
+  <rect x="142" y="15" width="30" height="17" rx="8.5" fill="none" stroke="#d0d7de"/>
+  <text class="sans muted" x="157" y="27" font-size="10" text-anchor="middle">bot</text>
+  <text class="sans muted" x="180" y="28" font-size="12">commented 1 minute ago</text>
   <rect x="586" y="13" width="140" height="22" rx="11" fill="#fff8c5" stroke="#d4a72c"/>
   <text class="sans" x="656" y="28" font-size="10.5" fill="#7d4e00" text-anchor="middle" font-weight="600">ILLUSTRATIVE MOCK</text>
 

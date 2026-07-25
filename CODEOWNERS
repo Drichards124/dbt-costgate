@@ -1,4 +1,4 @@
-# Code owners for costgate.
+# Code owners for dbt-costgate.
 # These owners are requested for review on every pull request, and are
 # required reviewers on protected branches.
 
@@ -6,7 +6,7 @@
 *       @Drichards124
 
 # The pricing table defines every dollar figure the tool reports — guard it.
-/src/costgate/data/   @Drichards124
+/src/dbt_costgate/data/   @Drichards124
 
 # Release and CI configuration.
 /.github/    @Drichards124

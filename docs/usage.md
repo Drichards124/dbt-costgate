@@ -1,19 +1,25 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Using costgate
+# Using dbt-costgate
 
-`costgate check` estimates the BigQuery cost impact of the dbt models a change
+`dbt-costgate check` estimates the BigQuery cost impact of the dbt models a change
 touches. It reads compiled dbt artifacts, dry-runs each changed model (free —
 nothing is executed), prices the bytes region-aware, and reports.
 
-> costgate never runs a billable query and never handles a credential. Auth is
+> dbt-costgate never runs a billable query and never handles a credential. Auth is
 > Application Default Credentials, exactly like dbt-bigquery.
 
 ## Install
 
 ```bash
-pip install costgate      # or: pipx install costgate / uv tool install costgate
+pip install git+https://github.com/Drichards124/dbt-costgate@v0.7.0
 ```
+
+Or download the wheel from the [latest release](https://github.com/Drichards124/dbt-costgate/releases)
+and `pip install` it — each release ships a wheel, an sdist, and `SHA256SUMS`.
+
+> Not on PyPI yet. Pin an exact tag rather than a branch, so an upgrade is
+> always something you chose.
 
 Requires Python ≥ 3.9 and BigQuery access via ADC:
 
@@ -27,14 +33,14 @@ On a feature branch, compile your project, then check what you changed:
 
 ```bash
 dbt compile
-costgate check
+dbt-costgate check
 ```
 
-costgate finds the models you changed versus `main` (via `git diff`) and prints
+dbt-costgate finds the models you changed versus `main` (via `git diff`) and prints
 each one's current scan cost. No baseline, no CI, no config required:
 
 ```text
-costgate — region: US · on-demand $6.25/TiB · built-in table
+dbt-costgate — region: US · on-demand $6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 2.91 TiB scanned   $18.19/run   $545.62/month (30 runs)
       ⚠ incremental — figure is the full-refresh scan
@@ -55,22 +61,22 @@ You can fail the run here — no baseline required — with an **absolute** cap 
 single model's total per-run cost or scan:
 
 ```bash
-costgate check --max-usd-total 20 --max-tib-total 3
+dbt-costgate check --max-usd-total 20 --max-tib-total 3
 ```
 
 These gate the *total* (not the increase), so they also catch an already-expensive
 model that a before/after diff would wave through because it barely changed. For
 incrementals the figure is the full-refresh scan (flagged `full-refresh`), so an
-absolute cap gates rebuild cost. Set them in `.costgate.yml` under `thresholds` to
-apply everywhere (see [Configuration](#configuration-costgateyml)).
+absolute cap gates rebuild cost. Set them in `.dbt-costgate.yml` under `thresholds` to
+apply everywhere (see [Configuration](#configuration-dbt-costgateyml)).
 
 ## CI: before/after diff and gating
 
 To show the **change** in cost (and block a PR that crosses a threshold), give
-costgate a baseline — `main`, compiled the same way — and thresholds:
+dbt-costgate a baseline — `main`, compiled the same way — and thresholds:
 
 ```bash
-costgate check --baseline path/to/main/manifest.json --format markdown
+dbt-costgate check --baseline path/to/main/manifest.json --format markdown
 ```
 
 ```text
@@ -79,7 +85,7 @@ costgate check --baseline path/to/main/manifest.json --format markdown
     - fct_orders_daily: +$18.19/run exceeds $5.00
 ```
 
-Exit codes: **0** pass, **1** gate failed, **2** costgate couldn't run
+Exit codes: **0** pass, **1** gate failed, **2** dbt-costgate couldn't run
 (bad args, missing/uncompiled manifest, auth failure, or every model errored).
 CI can hard-block on 1 and alert-only on 2.
 
@@ -94,17 +100,17 @@ the built table, not the current main branch's compiled SQL).
   downloads it — the author never leaves their branch.
 - **Compile it the same way as the PR** so incremental models are in full-refresh
   form on both sides (see below). A prod-run manifest captures incrementals in
-  their incremental form; costgate flags that as a basis mismatch rather than
+  their incremental form; dbt-costgate flags that as a basis mismatch rather than
   mis-diffing.
 
 ### Local before/after in one command (`--against <ref>`)
 
 Locally, skip the manual baseline entirely. Compile your branch once, then let
-costgate produce the baseline for you:
+dbt-costgate produce the baseline for you:
 
 ```bash
 dbt compile                       # your branch (the "current" side)
-costgate check --against main     # costgate compiles `main` for the baseline
+dbt-costgate check --against main     # dbt-costgate compiles `main` for the baseline
 ```
 
 `--against <ref>` checks `<ref>` out into a throwaway git worktree, runs
@@ -115,7 +121,7 @@ manage. `--against` and `--baseline` are mutually exclusive.
 Notes:
 
 - Your dbt project can live at the git repo root or in a subdirectory (monorepos):
-  costgate detects the repo root and compiles the project in its actual location.
+  dbt-costgate detects the repo root and compiles the project in its actual location.
   It infers the project directory from `--current` (the parent of your target dir);
   pass `--project-dir <dir>` to state it explicitly when your compiled target isn't
   at `<project>/target`.
@@ -131,11 +137,11 @@ Notes:
 ### Name your baselines (`baselines:` + `--baseline-target`)
 
 Rather than retyping `--baseline <path>` or `--against <ref>` every run — or pointing
-at different environments by hand — name your baselines once in `.costgate.yml` and
+at different environments by hand — name your baselines once in `.dbt-costgate.yml` and
 switch by name, like dbt's `--target`:
 
 ```yaml
-# .costgate.yml
+# .dbt-costgate.yml
 baselines:
   main:
     against: main                       # compile this git ref for the baseline
@@ -147,8 +153,8 @@ default_baseline: main                  # used when no baseline flag is given
 ```
 
 - Each entry is **exactly one** of `manifest:` (a path) or `against:` (a git ref).
-- Select one with `costgate check --baseline-target ple`. With `default_baseline` set,
-  a bare `costgate check` uses it — no flag needed.
+- Select one with `dbt-costgate check --baseline-target ple`. With `default_baseline` set,
+  a bare `dbt-costgate check` uses it — no flag needed.
 - Precedence: an explicit `--baseline`/`--against` wins, then `--baseline-target`, then
   `default_baseline`, then no baseline (local mode). Passing more than one is an error.
 - **Works the same in CI and locally** — it's config, so the GitHub Action reads it too
@@ -158,7 +164,7 @@ default_baseline: main                  # used when no baseline flag is given
 
 ### Renamed a model?
 
-costgate pairs baseline↔current models by dbt identity (`unique_id`), which is
+dbt-costgate pairs baseline↔current models by dbt identity (`unique_id`), which is
 tied to the model's `.sql` name. A **physical** table rename (a dbt `alias`,
 `schema`, or `database` that differs dev↔prod) does **not** change the identity, so
 the baseline is matched automatically — nothing to do. But renaming the **model
@@ -166,11 +172,11 @@ itself** (e.g. `fct_orders_monthly` → `fct_orders_daily`) changes its `unique_
 and auto-matching can no longer pair the two — the current model would be reported
 as *new*, losing the before/after.
 
-For that case, declare the pairing (`current: baseline`) so costgate diffs them —
+For that case, declare the pairing (`current: baseline`) so dbt-costgate diffs them —
 useful for seeing how, say, a granularity change affects scan cost:
 
 ```yaml
-# .costgate.yml
+# .dbt-costgate.yml
 renames:
   fct_orders_daily: fct_orders_monthly
 ```
@@ -186,9 +192,9 @@ renames:
 ## Audit / monitor-only (track cost without blocking)
 
 Not every team wants the gate to block a merge — some just want the cost record for
-internal tracking. costgate supports that without ever blocking a deploy:
+internal tracking. dbt-costgate supports that without ever blocking a deploy:
 
-- **`fail_on: never`** (`.costgate.yml`), `--fail-on never`, or the Action's
+- **`fail_on: never`** (`.dbt-costgate.yml`), `--fail-on never`, or the Action's
   `fail-on: never` input — thresholds still evaluate and any breach is shown as a
   *warning*, but the exit code is always **0**, so the check never blocks.
 - **Set no thresholds at all** — with nothing to breach, every run is `PASS` and you
@@ -204,13 +210,13 @@ This also gives a gradual rollout: start `never` (observe), move to `warn`
 
 ## GitHub Action
 
-Wrap `costgate check` in a pull-request gate with one step. The Action installs
-costgate, runs the check, and posts a single **sticky** comment with the cost
+Wrap `dbt-costgate check` in a pull-request gate with one step. The Action installs
+dbt-costgate, runs the check, and posts a single **sticky** comment with the cost
 report — updated in place on every push, never stacked.
 
 ```yaml
-# .github/workflows/costgate.yml
-name: costgate
+# .github/workflows/dbt-costgate.yml
+name: dbt-costgate
 on: pull_request
 
 # pull-requests: write lets the Action post the sticky comment on same-repo PRs.
@@ -222,11 +228,11 @@ permissions:
   id-token: write
 
 concurrency: # one run per PR — avoids two pushes racing to double-post
-  group: costgate-${{ github.ref }}
+  group: dbt-costgate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  costgate:
+  dbt-costgate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -246,10 +252,10 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/costgate@v0.6.0
+      - uses: Drichards124/dbt-costgate@v0.7.0
         with:
           baseline: baseline/manifest.json
-          fail-on: fail # optional; unset defers to .costgate.yml
+          fail-on: fail # optional; unset defers to .dbt-costgate.yml
 ```
 
 The Action needs a Python environment (your dbt setup provides one) and compiled
@@ -270,7 +276,7 @@ PASS/WARN/FAIL verdict is in the comment body.
 
 Incrementals are first-class. Compiled in a fresh target, `is_incremental()` is
 false, so dbt emits the **full-refresh** query (no `{{ this }}` reference), which
-dry-runs cleanly. costgate labels these "full-refresh scan": the number is the
+dry-runs cleanly. dbt-costgate labels these "full-refresh scan": the number is the
 cost to rebuild the table, and the baseline→PR diff of it reliably catches
 structural regressions (bad joins, lost partition pruning, widened scans).
 
@@ -281,7 +287,7 @@ dbt compile --defer --state path/to/prod/artifacts --favor-state
 ```
 
 The true per-incremental-run cost (a dynamic `WHERE ts > MAX(ts)` predicate) is
-not knowable from a dry-run — BigQuery reports the worst case. costgate does not
+not knowable from a dry-run — BigQuery reports the worst case. dbt-costgate does not
 fake it; it flags it.
 
 ## Accuracy notes
@@ -299,13 +305,13 @@ fake it; it flags it.
 
   The gap: a config change that does **not** alter the compiled SQL — `partition_by`,
   `cluster_by` — is not detected with a baseline, because it does not change this
-  model's own scan either. It changes what *downstream* queries scan, which costgate
+  model's own scan either. It changes what *downstream* queries scan, which dbt-costgate
   does not model. A change to `dbt_project.yml` is project-wide and can't be traced
-  to individual models from the diff alone; costgate says so on stderr and selects
+  to individual models from the diff alone; dbt-costgate says so on stderr and selects
   nothing for it. Price either case explicitly with `--select`, or pipe
   `dbt ls --select state:modified` for dbt-authoritative selection.
 - **Dynamic filters** (`CURRENT_DATE()`, subquery predicates) make BigQuery
-  dry-runs report a full-table scan. costgate flags these ("dry-run may be
+  dry-runs report a full-table scan. dbt-costgate flags these ("dry-run may be
   worst-case") and lets you `exclude`/`warn_only` heavily-partitioned models.
 - **Region-aware pricing.** The applied region, rate, and its source appear in
   every report. Unlisted regions fall back to a disclosed default; override a
@@ -313,7 +319,7 @@ fake it; it flags it.
   `pricing.regions` (see below). When a report spans regions with different
   sources, each region is tagged (`override` / `table` / `fallback`).
 
-## Configuration (`.costgate.yml`)
+## Configuration (`.dbt-costgate.yml`)
 
 ```yaml
 pricing:
@@ -352,8 +358,8 @@ fail_on: fail                   # never | warn | fail
 CLI flags (`--region`, `--usd-per-tib`, `--max-usd-per-run`, `--fail-on`, …)
 override the file.
 
-**The same config applies locally and in CI.** There is one `costgate check` — the
-GitHub Action just runs it — and both read the same committed `.costgate.yml`
+**The same config applies locally and in CI.** There is one `dbt-costgate check` — the
+GitHub Action just runs it — and both read the same committed `.dbt-costgate.yml`
 (auto-discovered from your project directory). So thresholds, `renames`,
 `baselines`, `exclude`/`warn_only`, and `fail_on` behave identically on your
 machine and in a PR run; commit the file and there is nothing CI-specific to wire
@@ -361,7 +367,7 @@ up. The one thing that doesn't travel automatically is a **CLI flag** — to set
 in CI, use the matching Action input.
 
 For the full, always-current list of keys — type, default, and what each does —
-run `costgate config` (add `--format json` for a machine-readable version).
+run `dbt-costgate config` (add `--format json` for a machine-readable version).
 
 **Rate precedence** (most specific first): CLI `--usd-per-tib` → config
 `pricing.regions[region]` → config `pricing.usd_per_tib` → built-in table →

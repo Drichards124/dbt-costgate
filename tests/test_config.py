@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from costgate.config import CONFIG_REFERENCE, Config, Thresholds
+from dbt_costgate.config import CONFIG_REFERENCE, Config, Thresholds
 
 
 def test_load_missing_file_returns_defaults(tmp_path: Path):
@@ -15,7 +15,7 @@ def test_load_missing_file_returns_defaults(tmp_path: Path):
 
 
 def test_load_full_config(tmp_path: Path):
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         """
 pricing:
   region: europe-west3
@@ -67,7 +67,7 @@ fail_on: warn
 
 
 def test_pricing_regions_parses_to_floats(tmp_path: Path):
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         """
 pricing:
   regions:
@@ -82,7 +82,7 @@ pricing:
 
 
 def test_pricing_regions_rejects_negative_rate(tmp_path: Path):
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         """
 pricing:
   regions:
@@ -128,7 +128,7 @@ def test_registry_covers_every_config_field_bidirectionally():
 
 def test_every_documented_key_is_honored_by_the_parser(tmp_path: Path):
     # a config that sets every documented key to a non-default value
-    (tmp_path / ".costgate.yml").write_text(
+    (tmp_path / ".dbt-costgate.yml").write_text(
         """
 pricing:
   region: europe-west3

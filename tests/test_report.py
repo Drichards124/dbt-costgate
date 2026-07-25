@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from costgate import report
-from costgate.models import (
+from dbt_costgate import report
+from dbt_costgate.models import (
     CostDelta,
     PricingDisclosure,
     Report,

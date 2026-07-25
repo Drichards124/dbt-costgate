@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from costgate.bigquery import DryRunResult
-from costgate.models import ErrorKind
+from dbt_costgate.bigquery import DryRunResult
+from dbt_costgate.models import ErrorKind
 
 
 def make_node(

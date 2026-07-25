@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-from costgate.models import TIB
-from costgate.pricing import PricingTable
+from dbt_costgate.models import TIB
+from dbt_costgate.pricing import PricingTable
 
 
 def test_known_region_uses_table_rate():
