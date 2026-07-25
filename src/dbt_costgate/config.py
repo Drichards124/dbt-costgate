@@ -60,6 +60,7 @@ class Config:
     default_baseline: str | None = None
     report_format: str = "terminal"
     fail_on: str = "fail"  # never | warn | fail
+    silence_notices: list[str] = field(default_factory=list)
 
     DEFAULT_FILENAMES = (".dbt-costgate.yml", ".dbt-costgate.yaml", "dbt-costgate.yml")
 
@@ -106,6 +107,7 @@ class Config:
             default_baseline=raw.get("default_baseline"),
             report_format=report.get("format", "terminal"),
             fail_on=raw.get("fail_on", "fail"),
+            silence_notices=[str(n) for n in ((raw.get("notices") or {}).get("silence") or [])],
         )
 
     def runs_per_month(self, model_name: str) -> int | None:
@@ -319,5 +321,17 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "fail",
         "Gate strictness: 'never' never fails the build, 'warn' fails on "
         "warnings, 'fail' fails only on threshold breaches.",
+    ),
+    ConfigField(
+        "notices.silence",
+        "silence_notices",
+        "list[str]",
+        [],
+        "Ids of advisory notices to stop reporting, e.g. dead-money-thresholds "
+        "on a team that has deliberately priced at 0. Each report prints a "
+        "notice's id beside it, and `dbt-costgate config` lists them. Silencing "
+        "is per-notice on purpose: there is no blanket off-switch, so turning "
+        "one off can never hide a different one you have not seen. An unknown "
+        "id is an error, not a no-op.",
     ),
 ]

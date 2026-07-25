@@ -106,6 +106,33 @@ class PricingTable:
             f"pricing.usd_per_tib for all of them), or drop pricing.currency."
         )
 
+    def fallback_notice(self, applied_sources: dict[str, str]) -> str | None:
+        """Warn when a region was priced from the default rather than a verified rate.
+
+        The bundled table cannot cover a location Google has only just opened, so
+        the fallback exists and the disclosure footer already names it. What the
+        footer does not say is which *direction* the guess errs in: the default is
+        the lowest rate BigQuery charges anywhere, so a fallback under-reports for
+        every region that is not among the cheapest — the wrong way round for a
+        gate, which should rather over-state a cost than wave one through.
+
+        Advisory only, and the remedy is entirely in the user's hands: an explicit
+        rate for that location always wins over anything bundled.
+        """
+        fallen = sorted(r for r, src in applied_sources.items() if src == "default-fallback")
+        if not fallen:
+            return None
+        names = ", ".join(fallen)
+        subject = "those locations" if len(fallen) > 1 else "that location"
+        return (
+            f"No verified rate for {names} — priced at the "
+            f"{self.currency} {self.default_usd_per_tib:,.2f}/TiB default, which is the lowest "
+            f"rate BigQuery charges anywhere, so the cost shown may be understated. Set the rate "
+            f"you actually pay: pricing.regions ({fallen[0]}: <rate>) for {subject}, "
+            f"pricing.usd_per_tib for one flat rate everywhere, or pricing.region to pin pricing "
+            f"to a location you have a rate for. Your value always wins over the built-in table."
+        )
+
     def rate_for(self, region: str | None) -> RateResult:
         """Resolve the $/TiB for a region. Precedence, most-specific first:
         CLI flat override → config per-region map → config flat override →

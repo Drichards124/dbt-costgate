@@ -13,12 +13,19 @@ illustrative; the formatting is not.
 
 from __future__ import annotations
 
-from dbt_costgate import policy, report
+from dbt_costgate import notices, policy, report
 from dbt_costgate.config import Config, Thresholds
 from dbt_costgate.models import TIB, CostDelta, PricingDisclosure, Report
+from dbt_costgate.pricing import PricingTable
 
 MIB = 1024**2
 GIB = 1024**3
+
+
+def _table() -> PricingTable:
+    """The bundled table, so the fallback notice quotes the real default rate."""
+    return PricingTable.load()
+
 
 # Rates are the real published ones for these regions, so an example never
 # implies a price that dbt-costgate would not actually apply.
@@ -37,6 +44,7 @@ def _delta(
     warning: str | None = None,
     error: str | None = None,
     runs: int | None = 30,
+    region: str = "US",
 ) -> CostDelta:
     def usd(b: int | None) -> float | None:
         return None if b is None else b / TIB * rate
@@ -51,26 +59,41 @@ def _delta(
         bytes_current=current,
         usd_baseline=usd(baseline),
         usd_current=usd(current),
-        region="US",
+        region=region,
         warnings=[warning] if warning else [],
         error=error,
         runs_per_month=runs,
     )
 
 
-def _report(deltas, *, mode: str, rate: float = US_RATE, source: str, thresholds: Thresholds):
+def _report(
+    deltas,
+    *,
+    mode: str,
+    rate: float = US_RATE,
+    source: str,
+    thresholds: Thresholds,
+    region: str = "US",
+    rate_source: str | None = None,
+):
     disclosure = PricingDisclosure(
-        regions={"US": rate},
+        regions={region: rate},
         source=source,
         table_version="2026.07",
         last_verified="2026-07-25",
-        region_sources={"US": "region-table" if rate == US_RATE else "user-override"},
+        region_sources={
+            region: rate_source or ("region-table" if rate == US_RATE else "user-override")
+        },
     )
+    config = Config(thresholds=thresholds)
     return Report(
         deltas=deltas,
         disclosure=disclosure,
-        verdict=policy.evaluate(deltas, Config(thresholds=thresholds), currency="USD"),
+        verdict=policy.evaluate(deltas, config, currency="USD"),
         mode=mode,
+        # Collected through the same registry the CLI uses, so a sample can never
+        # advertise advice — or a silencing id — the tool does not actually give.
+        notices=notices.collect(config, _table(), disclosure),
     )
 
 
@@ -204,14 +227,70 @@ def config_reference() -> str:
     return "\n".join(rows)
 
 
-def slots_terminal() -> str:
-    """Capacity/Editions slots: `pricing.usd_per_tib: 0.00`. No per-byte price
-    exists, so the report measures scanned bytes and gates on growth."""
-    deltas = [
+def _slot_deltas():
+    return [
         _delta("fct_orders_daily", int(2.91 * TIB), int(0.80 * TIB), rate=0.0, incremental=True)
     ]
+
+
+def slots_terminal() -> str:
+    """Capacity/Editions slots: `pricing.usd_per_tib: 0.00`. No per-byte price
+    exists, so the report measures scanned bytes and gates on growth.
+
+    The thresholds here are deliberately the bytes-based ones. A dollar
+    threshold would be inert at this rate — see `slots_dead_threshold_terminal`
+    — so the canonical slot example must not quietly carry one.
+    """
     return report.render_terminal(
-        _report(deltas, mode="diff", rate=0.0, source="user override", thresholds=_gate())
+        _report(
+            _slot_deltas(),
+            mode="diff",
+            rate=0.0,
+            source="user override",
+            thresholds=Thresholds(max_pct_increase=25.0),
+        )
+    )
+
+
+def slots_dead_threshold_terminal() -> str:
+    """The same slot setup with a dollar threshold left in place from before the
+    switch. It cannot fire, so the report says so rather than passing quietly."""
+    return report.render_terminal(
+        _report(
+            _slot_deltas(),
+            mode="diff",
+            rate=0.0,
+            source="user override",
+            thresholds=_gate(),
+        )
+    )
+
+
+def unknown_region_terminal() -> str:
+    """A location the bundled table has no verified rate for — a region Google
+    opened after the table was cut. It is priced from the default and the report
+    says which direction that guess errs in."""
+    fallback_rate = _table().default_usd_per_tib
+    region = "northamerica-northeast3"
+    deltas = [
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            int(0.80 * TIB),
+            rate=fallback_rate,
+            region=region,
+        )
+    ]
+    return report.render_terminal(
+        _report(
+            deltas,
+            mode="diff",
+            rate=fallback_rate,
+            source="default fallback",
+            thresholds=_gate(),
+            region=region,
+            rate_source="default-fallback",
+        )
     )
 
 
@@ -225,6 +304,8 @@ SAMPLES = {
     "saving-terminal": (saving_terminal, "text"),
     "negotiated-terminal": (negotiated_terminal, "text"),
     "slots-terminal": (slots_terminal, "text"),
+    "slots-dead-threshold-terminal": (slots_dead_threshold_terminal, "text"),
+    "unknown-region-terminal": (unknown_region_terminal, "text"),
     "mixed-frequency-terminal": (mixed_frequency_terminal, "text"),
     "config-reference": (config_reference, None),
 }

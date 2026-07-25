@@ -160,3 +160,34 @@ def test_default_fallback_also_counts_as_a_bundled_rate():
 
 def test_currency_is_normalised_to_upper_case():
     assert PricingTable.load(currency="eur").currency == "EUR"
+
+
+# --- fallback notice --------------------------------------------------------
+
+
+def test_fallback_notice_names_region_direction_and_remedy():
+    table = PricingTable.load()
+    notice = table.fallback_notice({"mars-central1": "default-fallback"})
+    assert notice is not None
+    assert "mars-central1" in notice
+    # The direction of the error is the point: the default is the cheapest rate
+    # on the board, so a fallback under-reports — the wrong way for a gate.
+    assert "understated" in notice
+    assert f"{table.default_usd_per_tib:,.2f}" in notice
+    for key in ("pricing.regions", "pricing.usd_per_tib", "pricing.region"):
+        assert key in notice
+
+
+def test_no_fallback_notice_when_every_rate_is_verified_or_overridden():
+    table = PricingTable.load()
+    assert table.fallback_notice({"US": "region-table", "EU": "region-table"}) is None
+    assert table.fallback_notice({"US": "user-override"}) is None
+    assert table.fallback_notice({}) is None
+
+
+def test_fallback_notice_quotes_the_real_default_rate():
+    """The rate in the advice must come from the table, not from a literal that
+    would survive a change to `default_usd_per_tib` while going quietly wrong."""
+    table = PricingTable.load()
+    table.default_usd_per_tib = 9.99
+    assert "9.99" in table.fallback_notice({"mars-central1": "default-fallback"})
