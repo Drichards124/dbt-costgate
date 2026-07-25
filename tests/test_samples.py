@@ -129,3 +129,68 @@ def test_every_relative_link_in_the_docs_resolves(doc: str):
                 broken.append(f"{target} (no such heading in {file_part})")
 
     assert not broken, f"broken links in {doc}:\n  " + "\n  ".join(broken)
+
+
+# --- documented action pins -------------------------------------------------
+#
+# The CI recipe in usage.md is copied verbatim by users, so a stale pin there
+# hands them a version we deliberately moved off. This drifted once already:
+# the repo's own workflows went to checkout@v7 / setup-python@v7 to clear Node
+# deprecation warnings, and the documented recipe sat at v4/v5 telling readers
+# to use exactly what we had just abandoned. Nothing compared the two.
+
+_USES = __import__("re").compile(r"uses:\s*([^@\s]+)@(\S+)")
+
+
+def _pins(text: str) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for action, ref in _USES.findall(text):
+        out.setdefault(action, set()).add(ref)
+    return out
+
+
+def _workflow_pins() -> dict[str, set[str]]:
+    merged: dict[str, set[str]] = {}
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for action, refs in _pins(wf.read_text("utf-8")).items():
+            merged.setdefault(action, set()).update(refs)
+    return merged
+
+
+def test_documented_action_pins_match_the_ones_we_run():
+    ours = _workflow_pins()
+    documented = _pins((ROOT / "docs" / "usage.md").read_text("utf-8"))
+    mismatched = [
+        f"docs/usage.md pins {action}@{sorted(refs)} but our workflows use "
+        f"{action}@{sorted(ours[action])}"
+        for action, refs in documented.items()
+        if action in ours and refs != ours[action]
+    ]
+    assert not mismatched, "\n  ".join([""] + mismatched)
+
+
+def test_third_party_pins_we_cannot_check_are_named_not_silently_skipped():
+    """The recipe also pins actions this repo does not itself run — the keyless
+    BigQuery auth step. There is no in-repo ground truth for those, so this test
+    exists to make that explicit rather than let the gap read as coverage. If the
+    set changes, someone has to look at the new one by hand.
+    """
+    ours = _workflow_pins()
+    documented = _pins((ROOT / "docs" / "usage.md").read_text("utf-8"))
+    unverifiable = {a for a in documented if a not in ours and not a.startswith("Drichards124/")}
+    assert unverifiable == {"google-github-actions/auth"}, (
+        f"unverifiable documented actions changed: {sorted(unverifiable)} — check each "
+        f"against its upstream latest major by hand, then update this test"
+    )
+
+
+def test_the_documented_action_pin_matches_the_version_we_ship():
+    """Release prep bumps `__version__` and this pin together. Asserting they
+    agree turns a hand-remembered release step into one that fails loudly."""
+    from dbt_costgate import __version__
+
+    documented = _pins((ROOT / "docs" / "usage.md").read_text("utf-8"))
+    assert documented["Drichards124/dbt-costgate"] == {f"v{__version__}"}, (
+        f"usage.md pins the Action at {documented['Drichards124/dbt-costgate']} but the "
+        f"package version is {__version__} — release prep missed a site"
+    )
