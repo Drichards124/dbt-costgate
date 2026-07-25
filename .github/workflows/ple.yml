@@ -53,7 +53,7 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install dist/*.whl
           /tmp/smoke/bin/dbt-costgate --version
-          /tmp/smoke/bin/python -c "import dbt_costgate; print(dbt-costgate.__version__)"
+          /tmp/smoke/bin/python -c "import dbt_costgate; print(dbt_costgate.__version__)"
 
   ple-gate:
     name: PLE gate
