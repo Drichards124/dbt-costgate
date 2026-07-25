@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A net impact line, so a change that *lowers* cost is reported as an outcome.**
+  Diff reports now end with one line naming the overall direction in words:
+
+  ```text
+  Net saving: USD 43.75/run · USD 1,312.50/month
+  Net increase: USD 13.19/run · USD 395.63/month
+  ```
+
+  Reductions were always calculated correctly, but they showed only as a minus
+  sign on a row and a `Gate: PASS` identical to a change that did nothing — so
+  optimisation work looked like the absence of a failure. On a pull request
+  touching several models, the totals also had to be added up by hand.
+
+  The net is a **measurement, not a verdict**: it counts every estimated model,
+  including ones excluded from gating (their cost is real either way), and it can
+  report a net saving while the gate still fails on an individual model that
+  breached its own threshold. If some models could not be estimated the line says
+  so rather than presenting a partial sum as a total, and the monthly figure is
+  omitted entirely unless every model contributed one. With a rate of `0` it
+  reports scanned bytes. `--format json` gains a signed `net` block, where
+  negative means a saving.
+
 - **`pricing.currency` / `--currency`** — label reported amounts with an ISO 4217
   code of your choice, e.g. `EUR`. Pair it with your own rate
   (`pricing.usd_per_tib` or `pricing.regions`) when you are billed in something

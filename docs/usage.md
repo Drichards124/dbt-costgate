@@ -80,9 +80,12 @@ dbt-costgate check --baseline path/to/main/manifest.json --format markdown
 ```
 
 ```text
-  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   +USD 13.19/run   +USD 395.63/month (30 runs)
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +395.63/month (30 runs)
+
+  Net increase: USD 13.19/run · USD 395.63/month
+
   GATE: FAIL
-    - fct_orders_daily: +USD 13.19/run exceeds USD 5.00
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
 ```
 
 Exit codes: **0** pass, **1** gate failed, **2** dbt-costgate couldn't run
