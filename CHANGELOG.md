@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Region-aware pricing now covers 48 BigQuery locations instead of 2.** The
+  built-in rate table previously held only the `US` and `EU` multi-regions, so
+  every regional location fell back to the US rate of $6.25/TiB and was reported
+  as `default-fallback`. Published on-demand rates vary far more than that —
+  from $6.25/TiB up to $11.25/TiB in `southamerica-east1` — so if your models run
+  outside the US/EU multi-regions, dbt-costgate was under-reporting their cost,
+  by up to 80% in the worst case.
+
+  Your reported figures will change accordingly, and the rate source for those
+  regions now reads `region-table` rather than `default-fallback`. A few examples:
+
+  | location | before | now |
+  |---|---|---|
+  | `europe-west3` (Frankfurt) | $6.25 | $8.125 |
+  | `asia-northeast1` (Tokyo) | $6.25 | $7.50 |
+  | `australia-southeast1` (Sydney) | $6.25 | $8.125 |
+  | `southamerica-east1` (São Paulo) | $6.25 | $11.25 |
+
+  Note that US regions are not uniform either: `us-south1` is $7.50/TiB and
+  `us-west2`/`us-west3` are $8.4375/TiB, not $6.25. Rates are unchanged for the
+  `US` and `EU` multi-regions.
+
+  If you set your own rate with `pricing.usd_per_tib` or `pricing.regions`, your
+  override still wins and nothing changes for you. Any location still not listed
+  continues to fall back to $6.25/TiB and to say so in the report.
+
 ## [0.7.1] - 2026-07-25
 
 ### Added
