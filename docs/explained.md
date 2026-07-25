@@ -19,7 +19,7 @@ Jump straight to what you need:
 |---|---|---|
 | [The short version](#the-short-version) | What it does, in five sentences | You're deciding whether this is for you |
 | [How it works](#how-it-works) | The pipeline, step by step | You want to know where the numbers come from |
-| [The two ways to run it](#the-two-ways-to-run-it) | Local check vs. CI gate | You're setting it up |
+| [How you run it](#how-you-run-it) | Local check, CI gate, and naming your baselines | You're setting it up |
 | [What it costs to run](#what-it-costs-to-run) | Why the tool itself is free | Someone asks "does this scan my data?" |
 | [Which pricing setup are you?](#which-pricing-setup-are-you) | On-demand, negotiated, or slots | Your figures look wrong, or you're on Editions |
 | [Every configuration key](#every-configuration-key) | Every setting, generated from the code | You want to know what a key does |
@@ -79,7 +79,7 @@ is blocked unless you configured a threshold.
 
 ---
 
-## The two ways to run it
+## How you run it
 
 **Locally, with no setup.** Compile, then check. It prints what each changed model
 scans and what that costs. No baseline, no config, no CI:
@@ -104,6 +104,42 @@ compiling it there. Two things to know about it: it reuses your already-installe
 *your branch's* package versions — close enough for a cost baseline, but not a
 perfect reconstruction of `main`. And it needs both git and dbt available, which
 makes it a local convenience rather than the way to do this in CI.
+
+### Name your baselines once, then stop thinking about them
+
+Everything above involves remembering a path or a ref. You don't have to. Name
+your baselines in `.dbt-costgate.yml` and switch between them by name, the way you
+switch dbt targets:
+
+```yaml
+baselines:
+  main:
+    against: main                            # compile this git ref
+  prod:
+    manifest: artifacts/prod/manifest.json   # a manifest someone already built
+default_baseline: main
+```
+
+```bash
+dbt-costgate check --baseline-target prod
+dbt-costgate check          # uses default_baseline — no flag at all
+```
+
+Each entry is **exactly one** of `manifest:` (a path) or `against:` (a git ref).
+Precedence runs most-specific first: an explicit `--baseline`/`--against`, then
+`--baseline-target`, then `default_baseline`, then no baseline at all. Passing
+more than one is an error rather than a silent winner.
+
+**This is how you solve most of the baseline problems below.** It is config, so it
+lives in the repo and applies identically on a laptop and in CI — nobody has to
+remember the right invocation, and there is one place to fix it when the answer
+changes. In particular, a `manifest:` entry pointing at an artifact compiled the
+correct way is the durable answer to the basis-mismatch and package-version
+caveats: get the compile right once, name it, and everyone gets it by name.
+
+One portability note: a `manifest:` target travels to CI as long as the path
+exists in the runner, while an `against:` target has to compile a ref, so in CI it
+needs full git history and dbt available. Locally, `against:` just works.
 
 ---
 
@@ -245,6 +281,9 @@ not.
 
 Stated up front, because a cost tool that hides its error bars is worse than none.
 
+Each one says what to do about it. Where there is a real fix, it is named; where
+there genuinely isn't one, it says so rather than inventing a workaround.
+
 **Incremental models are priced as a full refresh.** This is the caveat that
 surprises people most, so it's worth understanding rather than just noting.
 
@@ -261,9 +300,13 @@ there; it tells you which basis it used.
 
 The diff is still the useful signal: comparing full-refresh to full-refresh is
 apples to apples, and it reliably catches the structural regressions that matter —
-a bad join, lost partition pruning, a widened scan. Just read it as rebuild cost,
-and remember an absolute `max_usd_total` ceiling on an incremental is a cap on
-rebuild cost too.
+a bad join, lost partition pruning, a widened scan.
+
+> **What to do:** nothing to configure — read the figure as rebuild cost. Two
+> knock-ons worth knowing: a `max_usd_total` / `max_tib_total` ceiling on an
+> incremental caps *rebuild* cost, and `run_frequency` for an incremental should
+> reflect how often it is **fully rebuilt**, not how often it runs, or the monthly
+> figure will be far too high.
 
 **Comparing two different query shapes is refused, not fudged.** Following from
 the above: if your baseline manifest came from a production run, its incrementals
@@ -271,55 +314,96 @@ are captured in *incremental* form while your branch's are in full-refresh form.
 Diffing those two would produce a confident, meaningless number. dbt-costgate
 detects the mismatch and flags the model instead — `mixed basis — baseline is
 incremental_form, current is full_refresh; recompile the baseline the same way`.
-Compile the baseline the way CI compiles the branch:
 
-```bash
-dbt compile --defer --state path/to/prod/artifacts --favor-state
-```
+> **What to do:** compile the baseline the way CI compiles the branch —
+> `dbt compile --defer --state path/to/prod/artifacts --favor-state` — then stop
+> relying on anyone remembering that. Point a
+> [named baseline](#name-your-baselines-once-then-stop-thinking-about-them) at
+> the resulting manifest and set it as `default_baseline`, so the correct
+> baseline is what a bare `dbt-costgate check` already uses.
 
 **Renaming a model breaks its history.** Models are paired between baseline and
 branch by dbt identity (`unique_id`), which is tied to the `.sql` filename. Rename
 the file and the pairing is lost — the model is reported as *new* and you lose the
-before/after. Declare the pairing under `renames:` to keep it. Renaming the
-**physical table** (a dbt `alias`, `schema`, or `database`) does *not* change the
-identity, so that case needs nothing.
+before/after.
+
+> **What to do:** declare the pairing under `renames:` (`current: baseline`, by
+> model name or full `unique_id`). An entry it cannot resolve — ambiguous across
+> packages, or two models mapped onto one — fails the run rather than mis-diffing
+> quietly. Renaming only the **physical table** (a dbt `alias`, `schema`, or
+> `database`) does not change the identity, so that case needs nothing at all.
 
 **Percentages get silly when the baseline is tiny.** A model going from 68 MiB to
 2.91 TiB is a real and serious regression, and it reads as `+4,474,029%`. That is
-arithmetically correct and not very useful; the money column is the one to read at
-that end of the scale. Conversely a brand-new model shows `—` rather than a
-percentage, because there is nothing to take a ratio against.
+arithmetically correct and not very useful. A brand-new model shows `—` instead,
+because there is nothing to take a ratio against.
+
+> **What to do:** gate small-baseline models on money or bytes rather than
+> percentage — `max_usd_increase_per_run` or `max_tib_total` — and read the
+> money column when a percentage goes astronomical. `max_pct_increase` earns its
+> keep on models with a substantial baseline, and on slot pricing where it is one
+> of the only two rate-free thresholds.
 
 **Not every error is a failure.** A model whose own target table does not exist
 yet — normal in a fresh schema or on a new model — is reported as not estimated
 and deliberately does *not* fail the run. Only genuinely operational problems
-(auth, permissions, an uncompiled manifest) exit 2. And when models cannot be
-estimated, the net line says how many were left out rather than presenting a
-partial sum as a total.
+(auth, permissions, an uncompiled manifest) exit 2.
+
+> **What to do:** usually nothing; this is the design. If you want a model's
+> problems never to block, `exclude` or `warn_only` it. And note that when models
+> cannot be estimated, the net line says how many were left out rather than
+> presenting a partial sum as a total.
 
 **Models you exclude from gating still count toward the net.** `exclude` and
 `warn_only` stop a model from *failing* the gate; they do not pretend it costs
 nothing. Its spend is real, so it is included in the net impact figure.
 
+> **What to do:** nothing — this is deliberate. The gate is a policy verdict and
+> the net is a measurement, which is also why a report can show a net saving while
+> the gate still fails on one model that breached its own threshold.
+
 **Monthly figures use an assumption you supply.** `run_frequency` is a number you
 configure, not something measured. If a model actually runs 90 times a month and
 you told it 30, the monthly figure is a third of reality.
 
+> **What to do:** set `run_frequency.models` per model for anything whose cadence
+> differs from the default, rather than leaving everything on
+> `run_frequency.default`. If you set no frequency at all, no monthly figure is
+> shown — an absent number rather than a wrong one.
+
 **Dynamic filters read as worst case.** A predicate like `CURRENT_DATE()` cannot
-be resolved at dry-run time, so BigQuery reports a full-table scan. Those models
-are flagged, and you can exclude them or mark them warn-only.
+be resolved at dry-run time, so BigQuery reports a full-table scan.
+
+> **What to do:** those models are flagged in the report, so you can see which
+> they are. Put heavily-partitioned ones under `warn_only` to keep reporting them
+> without blocking, or `exclude` to drop them from gating entirely.
 
 **The free tier is not modelled.** The first 1 TiB per month is free per account,
 which dbt-costgate cannot know the consumption of, so it prices from the first
 byte.
 
+> **What to do:** nothing available, and the bias is deliberate — over-reporting
+> a small change is safer for a gate than under-reporting one. It matters least
+> where it matters most: on any change big enough to be worth blocking, one free
+> TiB is noise.
+
 **Config changes with identical compiled SQL are invisible.** Changing
 `partition_by` or `cluster_by` may not change *this* model's compiled SQL at all.
 It changes what *downstream* queries scan, which this tool does not model.
 
+> **What to do:** no fix — dbt-costgate prices the model in front of it, not the
+> queries other people will run against it later. Worth knowing that a clustering
+> change reviewed here as "no cost impact" may still be significant downstream.
+
 **Bundled rates are best-effort.** Every rate carries a `last_verified` date and
 every report names its source. A location that is not in the table falls back to a
 default and says so, rather than quietly guessing.
+
+> **What to do:** if your rate differs from list price — negotiated, Editions, or
+> a location that is falling back — set it with `pricing.usd_per_tib` or
+> `pricing.regions`. Your override always wins over the table, so updating the
+> bundled rates can never overwrite the price you actually pay. Adding a verified
+> location to the table is a one-line pull request.
 
 ---
 
