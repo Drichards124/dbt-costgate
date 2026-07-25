@@ -149,6 +149,30 @@ def negotiated_terminal() -> str:
     )
 
 
+def mixed_frequency_terminal() -> str:
+    """The same change, with a per-model `run_frequency`.
+
+    Each row states the frequency it used, so a monthly figure is never an
+    unexplained number. The incremental here is fully rebuilt weekly rather than
+    nightly, which is the distinction that matters: the figure being multiplied is
+    the rebuild scan, not a nightly incremental run.
+    """
+    deltas = [
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            int(0.80 * TIB),
+            incremental=True,
+            warning="incremental — figure is the full-refresh scan",
+            runs=4,
+        ),
+        _delta("dim_customers", int(412.5 * MIB), new=True, runs=30),
+    ]
+    return report.render_terminal(
+        _report(deltas, mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
 def config_reference() -> str:
     """Every `.dbt-costgate.yml` key, rendered from `CONFIG_REFERENCE` — the same
     registry the `dbt-costgate config` command prints.
@@ -201,6 +225,7 @@ SAMPLES = {
     "saving-terminal": (saving_terminal, "text"),
     "negotiated-terminal": (negotiated_terminal, "text"),
     "slots-terminal": (slots_terminal, "text"),
+    "mixed-frequency-terminal": (mixed_frequency_terminal, "text"),
     "config-reference": (config_reference, None),
 }
 
