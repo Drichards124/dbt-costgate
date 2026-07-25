@@ -14,8 +14,7 @@ development setup, and how a change reaches a release.
   entirely to Google's Application Default Credentials chain. Do not add
   credential flags, token parameters, or secret handling of any kind.
 - **No telemetry, no phone-home.** The only network endpoint this tool talks
-  to is the BigQuery API (and, if explicitly enabled, the Cloud Billing
-  Catalog API for live pricing).
+  to is the BigQuery API.
 - **Dollar figures must be traceable.** Every reported cost states the
   region, the rate applied, and where that rate came from. Changes to the
   pricing table (`src/dbt_costgate/data/`) must cite Google's published pricing
