@@ -206,7 +206,7 @@ def test_zero_rate_report_drops_money_and_shows_byte_growth():
 
 def test_zero_rate_markdown_has_no_cost_columns():
     out = report.render_markdown(_unpriced_report())
-    assert "| Model | Baseline | This change | Δ |" in out
+    assert "| Model | Baseline | This change | Δ % |" in out
     assert "/ run" not in out and "/ month" not in out
     assert "+350%" in out
 

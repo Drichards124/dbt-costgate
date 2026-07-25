@@ -174,7 +174,9 @@ def render_markdown(report: Report) -> str:
 
     cur = d0.currency
     if diff and not d0.priced:
-        out.append("| Model | Baseline | This change | Δ |")
+        # Explicitly `Δ %`: a bare `Δ` would mean money in the priced shape and a
+        # percentage here, which is the same column heading meaning two things.
+        out.append("| Model | Baseline | This change | Δ % |")
         out.append("|---|--:|--:|--:|")
         for d in report.deltas:
             out.append(
