@@ -57,7 +57,8 @@ def unpriced_threshold_notice(thr: Thresholds, priced: bool) -> str | None:
 
     Advisory only. A team that has decided to price at 0 and leave the dollar
     thresholds in place is not doing anything invalid, so this never blocks;
-    it only refuses to let the situation go unstated.
+    it only refuses to let the situation go unstated. Returns the core message —
+    `notices.collect` appends the advisory tail.
     """
     if priced:
         return None
@@ -68,8 +69,7 @@ def unpriced_threshold_notice(thr: Thresholds, priced: bool) -> str | None:
     return (
         f"{keys} cannot fire: no per-byte price is configured, so every cost on this run is 0.00 "
         f"and no dollar figure can exceed a limit. Gate on scanned bytes instead with "
-        f"thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — this "
-        f"does not affect the gate or the exit code."
+        f"thresholds.max_pct_increase or thresholds.max_tib_total."
     )
 
 

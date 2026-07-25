@@ -459,7 +459,8 @@ def test_notices_reach_the_json_payload(tmp_path: Path):
         runner=runner,
     )
     payload = json.loads(out_file.read_text("utf-8"))
-    assert any("mars-central1" in n for n in payload["notices"])
+    assert [n["id"] for n in payload["notices"]] == ["unverified-region-rate"]
+    assert any("mars-central1" in n["message"] for n in payload["notices"])
     assert payload["verdict"]["exit_code"] == 0
 
 
@@ -473,3 +474,62 @@ def test_no_notices_on_an_ordinary_priced_run(tmp_path: Path, capsys):
         runner=runner,
     )
     assert "⚠" not in capsys.readouterr().out
+
+
+def test_silencing_a_notice_removes_it_from_the_report(tmp_path: Path, capsys):
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    (tmp_path / ".dbt-costgate.yml").write_text(
+        "notices:\n  silence:\n    - dead-money-thresholds\n", "utf-8"
+    )
+    runner = FakeDryRunner({"CUR_fct": TIB})
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--project-dir",
+            str(tmp_path),
+            "--select",
+            "fct",
+            "--usd-per-tib",
+            "0",
+            "--max-usd-total",
+            "1.0",
+        ],
+        runner=runner,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "cannot fire" not in out
+
+
+def test_unknown_silence_id_is_an_error_not_a_no_op(tmp_path: Path, capsys):
+    """A typo here would silently re-enable a warning the user believes they
+    turned off — on a shared config, that reads as 'handled' when it is not."""
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    (tmp_path / ".dbt-costgate.yml").write_text(
+        "notices:\n  silence:\n    - dead-money-threshold\n", "utf-8"
+    )
+    runner = FakeDryRunner({"CUR_fct": TIB})
+    code = main(
+        ["check", "--current", str(target), "--project-dir", str(tmp_path), "--select", "fct"],
+        runner=runner,
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "unknown notice id(s) dead-money-threshold" in err
+    assert "dead-money-thresholds" in err  # names the valid ones
+
+
+def test_currency_mismatch_exits_2_with_a_message_not_a_traceback(tmp_path: Path, capsys):
+    """Regression: this guard raised from a spot nothing caught, so a mislabelled
+    currency produced a traceback instead of the documented exit 2."""
+    target = _target(tmp_path, make_node("fct", compiled_code="CUR_fct"))
+    runner = FakeDryRunner({"CUR_fct": TIB})
+    code = main(
+        ["check", "--current", str(target), "--select", "fct", "--currency", "EUR"],
+        runner=runner,
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "does not convert currencies" in err

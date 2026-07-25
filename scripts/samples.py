@@ -13,7 +13,7 @@ illustrative; the formatting is not.
 
 from __future__ import annotations
 
-from dbt_costgate import policy, report
+from dbt_costgate import notices, policy, report
 from dbt_costgate.config import Config, Thresholds
 from dbt_costgate.models import TIB, CostDelta, PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
@@ -86,22 +86,14 @@ def _report(
         },
     )
     config = Config(thresholds=thresholds)
-    # The notices are produced by the same functions the CLI calls, so a sample
-    # can never advertise advice the tool does not actually give.
-    notices = [
-        n
-        for n in (
-            policy.unpriced_threshold_notice(config.thresholds, disclosure.priced),
-            _table().fallback_notice(disclosure.region_sources),
-        )
-        if n
-    ]
     return Report(
         deltas=deltas,
         disclosure=disclosure,
         verdict=policy.evaluate(deltas, config, currency="USD"),
         mode=mode,
-        notices=notices,
+        # Collected through the same registry the CLI uses, so a sample can never
+        # advertise advice — or a silencing id — the tool does not actually give.
+        notices=notices.collect(config, _table(), disclosure),
     )
 
 

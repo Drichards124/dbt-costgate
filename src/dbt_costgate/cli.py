@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, policy, report
+from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, notices, policy, report
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
@@ -177,6 +177,28 @@ def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
         region_sources=region_sources,
         currency=table.currency,
     )
+
+
+def _validate_resolved_config(table: PricingTable, config: Config, disclosure) -> None:
+    """Config errors only detectable once pricing has resolved. Raises _UsageError.
+
+    Kept together so both have a caught raise site: the currency check used to
+    raise from the middle of `run_check`, where nothing caught it, so a
+    mislabelled currency produced a traceback instead of the documented exit 2.
+    """
+    # A non-default currency describes a rate the user supplied. If any applied
+    # rate still came from the bundled (USD) table, labelling it otherwise would
+    # be silently wrong, so refuse rather than mislabel.
+    problem = table.currency_is_sound(disclosure.region_sources)
+    if problem:
+        raise _UsageError(problem)
+
+    unknown = notices.unknown_ids(config.silence_notices)
+    if unknown:
+        raise _UsageError(
+            f"notices.silence: unknown notice id(s) {', '.join(unknown)}. "
+            f"Valid ids: {', '.join(notices.NOTICE_IDS)}."
+        )
 
 
 def _select(
@@ -353,31 +375,22 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     deltas = estimate.build_deltas(estimates, table, config)
     disclosure = _build_disclosure(table, deltas)
 
-    # A non-default currency describes a rate the user supplied. If any applied
-    # rate still came from the bundled (USD) table, labelling it otherwise would
-    # be silently wrong, so refuse rather than mislabel.
-    problem = table.currency_is_sound(disclosure.region_sources)
-    if problem:
-        raise _UsageError(problem)
+    try:
+        _validate_resolved_config(table, config, disclosure)
+    except _UsageError as exc:
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
 
     verdict = policy.evaluate(deltas, config, currency=table.currency)
     # Advisory notes about the configuration itself — a setting that cannot do
     # what it looks like it does. Collected after the verdict to make it plain
     # they are not inputs to it.
-    notices = [
-        n
-        for n in (
-            policy.unpriced_threshold_notice(config.thresholds, disclosure.priced),
-            table.fallback_notice(disclosure.region_sources),
-        )
-        if n
-    ]
     rep = Report(
         deltas=deltas,
         disclosure=disclosure,
         verdict=verdict,
         mode="diff" if diff_mode else "absolute",
-        notices=notices,
+        notices=notices.collect(config, table, disclosure),
     )
 
     rendered = report.render(rep, config.report_format)

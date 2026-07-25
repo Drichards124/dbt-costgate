@@ -6,6 +6,7 @@ import pytest
 from dbt_costgate import report
 from dbt_costgate.models import (
     CostDelta,
+    Notice,
     PricingDisclosure,
     Report,
     Status,
@@ -375,25 +376,30 @@ def test_markdown_shows_the_net_above_the_gate_verdict():
 
 # --- advisory notices -------------------------------------------------------
 
-_NOTICE = "thresholds.max_usd_total cannot fire: no per-byte price is configured."
+_NOTICE = Notice(
+    id="dead-money-thresholds",
+    message="thresholds.max_usd_total cannot fire: no per-byte price is configured.",
+)
 
 
 def test_notices_render_in_every_format_and_sit_with_the_disclosure():
     rep = _report()
     rep.notices = [_NOTICE]
+    body = _NOTICE.message
 
     term = report.render_terminal(rep)
-    assert f"⚠ {_NOTICE}" in term
+    # The id leads the line: it is what a user types into `notices.silence`.
+    assert f"⚠ {_NOTICE.id}: {body}" in term
     # Placed with the provenance footer, not with the gate: both describe how the
     # run was configured rather than what the change did.
-    assert term.index(_NOTICE) > term.index("GATE:")
-    assert term.index(_NOTICE) < term.index("Pricing:")
+    assert term.index(body) > term.index("GATE:")
+    assert term.index(body) < term.index("Pricing:")
 
     md = report.render_markdown(rep)
-    assert f"> ⚠ {_NOTICE}" in md
-    assert md.index(_NOTICE) < md.index("<sub>")
+    assert f"> ⚠ **{_NOTICE.id}** — {body}" in md
+    assert md.index(body) < md.index("<sub>")
 
-    assert json.loads(report.render_json(rep))["notices"] == [_NOTICE]
+    assert json.loads(report.render_json(rep))["notices"] == [{"id": _NOTICE.id, "message": body}]
 
 
 def test_absent_notices_add_nothing():
@@ -413,7 +419,7 @@ def test_a_notice_is_not_confusable_with_a_gate_breach():
     rep.notices = [_NOTICE]
     term = report.render_terminal(rep)
     assert "GATE: PASS" in term
-    assert f"    - {_NOTICE}" not in term
+    assert f"    - {_NOTICE.message}" not in term
     md = report.render_markdown(rep)
     assert "✅ **Gate: PASS**" in md
-    assert f"- {_NOTICE}" not in md
+    assert f"\n- {_NOTICE.message}" not in md

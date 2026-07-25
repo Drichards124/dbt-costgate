@@ -280,7 +280,7 @@ dbt-costgate — region: US · bytes only (no per-byte price configured)
   GATE: FAIL
     - fct_orders_daily: +264% exceeds 25%
 
-  ⚠ thresholds.max_usd_increase_per_run cannot fire: no per-byte price is configured, so every cost on this run is 0.00 and no dollar figure can exceed a limit. Gate on scanned bytes instead with thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — this does not affect the gate or the exit code.
+  ⚠ dead-money-thresholds: thresholds.max_usd_increase_per_run cannot fire: no per-byte price is configured, so every cost on this run is 0.00 and no dollar figure can exceed a limit. Gate on scanned bytes instead with thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — this does not affect the gate or the exit code. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [dead-money-thresholds].
   Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only. Slot/capacity cost cannot be estimated before a query runs.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
@@ -289,6 +289,23 @@ dbt-costgate — region: US · bytes only (no per-byte price configured)
 It is **advisory** — the run continues and the exit code is unchanged. If pricing
 at `0.00` and keeping the dollar thresholds is how you want to work, nothing
 stops you; the situation just will not go unstated.
+
+Once you have made that decision, silence it by id so it stops appearing on every
+pull request:
+
+```yaml
+# .dbt-costgate.yml
+notices:
+  silence:
+    - dead-money-thresholds
+```
+
+The id is the first thing on the notice line, so you never have to look it up.
+Silencing is **per notice on purpose — there is no blanket off-switch**, so
+turning this one off can never hide a different notice you have not seen yet,
+including one added in a later release. An unknown id is an error rather than a
+no-op: a typo would otherwise leave a warning on that you believe you turned off.
+`dbt-costgate config` lists every valid id.
 
 **On a location the bundled table doesn't know** — a region Google opened after
 the table was last verified. dbt-costgate falls back to a default rate rather
@@ -307,7 +324,7 @@ dbt-costgate — region: northamerica-northeast3 · on-demand USD 6.25/TiB · de
     - fct_orders_daily: USD +13.19/run exceeds USD 5.00
     - fct_orders_daily: +264% exceeds 25%
 
-  ⚠ No verified rate for northamerica-northeast3 — priced at the USD 6.25/TiB default, which is the lowest rate BigQuery charges anywhere, so the cost shown may be understated. Set the rate you actually pay: pricing.regions (northamerica-northeast3: <rate>) for that location, pricing.usd_per_tib for one flat rate everywhere, or pricing.region to pin pricing to a location you have a rate for. Your value always wins over the built-in table.
+  ⚠ unverified-region-rate: No verified rate for northamerica-northeast3 — priced at the USD 6.25/TiB default, which is the lowest rate BigQuery charges anywhere, so the cost shown may be understated. Set the rate you actually pay: pricing.regions (northamerica-northeast3: <rate>) for that location, pricing.usd_per_tib for one flat rate everywhere, or pricing.region to pin pricing to a location you have a rate for. Your value always wins over the built-in table. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [unverified-region-rate].
   Pricing: northamerica-northeast3 USD 6.25/TiB · default fallback (table 2026.07, verified 2026-07-25)
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
@@ -528,6 +545,9 @@ default_baseline: main          # baseline used when no --baseline/--against/--b
 report:
   format: terminal              # terminal | markdown | json
 fail_on: fail                   # never | warn | fail
+notices:                        # advisory warnings to stop reporting (see below)
+  silence:
+    - dead-money-thresholds
 ```
 
 CLI flags (`--region`, `--usd-per-tib`, `--max-usd-per-run`, `--fail-on`, …)

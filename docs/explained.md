@@ -257,6 +257,9 @@ regardless of how you pay.
 If you leave a **dollar** threshold configured at a rate of `0.00`, it can never
 fire — every cost is `0.00`, so nothing exceeds anything. The report warns you
 and names the setting, but does not block: it is your call whether to change it.
+Once you have decided, `notices.silence: [dead-money-thresholds]` stops it
+appearing on every pull request. There is no blanket off-switch — silencing is
+per notice, so it can never hide one you have not seen.
 
 Worked examples of all three, generated from the real code, are in
 [usage.md](usage.md#what-the-report-looks-like-in-your-setup).
@@ -305,6 +308,7 @@ You can also print this table at any time with `dbt-costgate config`.
 | `default_baseline` | `str` | _none_ | Name of the `baselines:` entry to use when no --baseline/--against/--baseline-target is given, so `dbt-costgate check` diffs without a flag. |
 | `report.format` | `terminal|markdown|json` | `terminal` | Output format when not overridden by --format. |
 | `fail_on` | `never|warn|fail` | `fail` | Gate strictness: 'never' never fails the build, 'warn' fails on warnings, 'fail' fails only on threshold breaches. |
+| `notices.silence` | `list[str]` | _empty_ | Ids of advisory notices to stop reporting, e.g. dead-money-thresholds on a team that has deliberately priced at 0. Each report prints a notice's id beside it, and `dbt-costgate config` lists them. Silencing is per-notice on purpose: there is no blanket off-switch, so turning one off can never hide a different one you have not seen. An unknown id is an error, not a no-op. |
 <!-- END GENERATED: config-reference -->
 
 Every CLI flag has a matching GitHub Action input, so anything you can do locally

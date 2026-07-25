@@ -44,6 +44,9 @@ default_baseline: main
 report:
   format: markdown
 fail_on: warn
+notices:
+  silence:
+    - dead-money-thresholds
 """,
         "utf-8",
     )
@@ -159,6 +162,9 @@ default_baseline: main
 report:
   format: markdown
 fail_on: warn
+notices:
+  silence:
+    - dead-money-thresholds
 """,
         "utf-8",
     )
