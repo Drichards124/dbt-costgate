@@ -36,6 +36,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   override still wins and nothing changes for you. Any location still not listed
   continues to fall back to $6.25/TiB and to say so in the report.
 
+### Fixed
+
+- **`max_pct_increase` no longer stops working when you set a rate of `0`.** A
+  rate of `0.00` is documented for capacity/flat-rate slots, where bytes scanned
+  is a work signal rather than an invoice. Setting it makes every dollar figure
+  `0.00`, which correctly neutralises the three USD thresholds — but it also
+  silently disabled the percentage threshold, because the percentage was computed
+  from dollars. `max_tib_total` was left as the only gate that still fired, so a
+  model whose scan grew tenfold could pass with exit code 0 and no warning.
+
+  The percentage is now computed from scanned bytes. A percentage has no
+  currency, so it holds under any pricing model.
+
+  **This can newly fail a build that previously passed** — that is the point, but
+  worth knowing before you upgrade if you run with `usd_per_tib: 0`. If you are
+  on on-demand pricing with any non-zero rate, nothing changes: both sides of a
+  comparison are priced at the same regional rate, so the rate cancels out of a
+  ratio and the reported percentage is identical to before.
+
+  `pct_delta` in `--format json` output is affected the same way — it reported
+  `null` at a zero rate and now reports the real percentage.
+
 ## [0.7.1] - 2026-07-25
 
 ### Added
