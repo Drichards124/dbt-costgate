@@ -423,7 +423,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/dbt-costgate@v0.7.1
+      - uses: Drichards124/dbt-costgate@v0.8.0
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .dbt-costgate.yml
