@@ -28,6 +28,19 @@ def format_money(value: float | None, currency: str, *, signed: bool = False) ->
     return f"{currency} {value:+,.2f}" if signed else f"{currency} {value:,.2f}"
 
 
+@dataclass(frozen=True)
+class Notice:
+    """One run-level advisory, and the id that identifies it in config.
+
+    The id is stable and user-facing: it is what goes in `notices.silence`, and
+    reports print it beside the message so the way to turn a notice off is
+    visible from the notice itself.
+    """
+
+    id: str
+    message: str
+
+
 class EstimateBasis(str, Enum):
     """How a model's bytes were measured — surfaced so a diff never silently
     compares two different query shapes (see the basis-mismatch guard)."""
@@ -214,6 +227,12 @@ class Report:
     disclosure: PricingDisclosure
     verdict: Verdict
     mode: str  # "diff" | "absolute"
+    # Run-level notes about the *configuration* rather than about a model — a
+    # setting that cannot do what it looks like it does. Advisory by
+    # construction: they are never consulted by `policy.evaluate`, so a notice
+    # can never change a verdict or an exit code. Per-model caveats belong on
+    # `CostDelta.warnings` instead.
+    notices: list[Notice] = field(default_factory=list)
 
     # --- net impact -------------------------------------------------------
     # The per-model rows say what each model did; nothing said what the change

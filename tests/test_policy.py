@@ -194,3 +194,54 @@ def test_breach_messages_carry_the_configured_currency():
     cfg = Config(thresholds=Thresholds(max_usd_increase_per_run=10.0))
     breach = policy.evaluate([d], cfg, currency="EUR").breaches[0]
     assert "EUR +50.00/run exceeds EUR 10.00" in breach
+
+
+# --- advisory notices -------------------------------------------------------
+
+
+def test_dollar_threshold_at_zero_rate_is_reported_as_dead():
+    thr = Thresholds(max_usd_increase_per_run=5.0, max_pct_increase=25.0)
+    notice = policy.unpriced_threshold_notice(thr, priced=False)
+    assert notice is not None
+    assert "thresholds.max_usd_increase_per_run" in notice
+    # It must not name the thresholds that still work — that is the whole advice.
+    assert "thresholds.max_pct_increase cannot" not in notice
+    assert "max_tib_total" in notice
+
+
+def test_every_dead_money_threshold_is_named():
+    thr = Thresholds(
+        max_usd_increase_per_run=5.0,
+        max_usd_increase_per_month=100.0,
+        max_usd_total=20.0,
+    )
+    notice = policy.unpriced_threshold_notice(thr, priced=False)
+    for key in ("max_usd_increase_per_run", "max_usd_increase_per_month", "max_usd_total"):
+        assert f"thresholds.{key}" in notice
+
+
+def test_no_notice_when_priced_or_when_no_money_threshold_is_set():
+    money = Thresholds(max_usd_increase_per_run=5.0)
+    bytes_only = Thresholds(max_pct_increase=25.0, max_tib_total=3.0)
+    assert policy.unpriced_threshold_notice(money, priced=True) is None
+    assert policy.unpriced_threshold_notice(bytes_only, priced=False) is None
+    assert policy.unpriced_threshold_notice(Thresholds(), priced=False) is None
+
+
+def test_zero_dollar_cap_is_still_dead_at_a_zero_rate():
+    """A `max_usd_total: 0` zero-tolerance cap looks strictest of all, and is the
+    one most likely to be trusted — but `0.00 > 0` is false, so it never fires."""
+    assert policy.unpriced_threshold_notice(Thresholds(max_usd_total=0.0), priced=False) is not None
+
+
+def test_notice_never_changes_the_verdict():
+    """Advisory means advisory: the same deltas and config must produce the same
+    verdict and exit code whether or not a notice is warranted."""
+    cfg = Config(thresholds=Thresholds(max_usd_increase_per_run=5.0, max_pct_increase=25.0))
+    unpriced = _delta(usd_baseline=0.0, usd_current=0.0, bytes_baseline=TIB, bytes_current=4 * TIB)
+    v = policy.evaluate([unpriced], cfg)
+    assert policy.unpriced_threshold_notice(cfg.thresholds, priced=False) is not None
+    # The percentage threshold still fires; the dead dollar one contributes nothing.
+    assert v.status == Status.FAIL
+    assert v.exit_code == policy.EXIT_GATE_FAILED
+    assert v.breaches == ["m: +300% exceeds 25%"]
