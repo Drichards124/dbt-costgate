@@ -166,7 +166,6 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
 - [ ] **`pre-commit` hook** entry
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
-- [ ] **Live pricing** (opt-in) via the Cloud Billing Catalog API
 
 ## Non-goals
 
