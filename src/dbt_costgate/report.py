@@ -110,18 +110,16 @@ def render_terminal(report: Report) -> str:
         flag_str = f"  ({', '.join(flags)})" if flags else ""
         cur = d0.currency
         if diff:
-            # Unpriced: the byte movement and its percentage are the whole signal.
-            tail = (
-                f"{_pct_cell(d)}"
-                if not d0.priced
-                else f"{_delta_cell(d, cur)}/run"
-                + (
-                    f"   {_money(d.usd_per_month_delta, cur, signed=True)}/month "
-                    f"({d.runs_per_month} runs)"
-                    if d.usd_per_month_delta is not None
-                    else ""
-                )
-            )
+            # The percentage leads in both cases; unpriced simply has no money after
+            # it. Keeps terminal and markdown reporting the same set of figures.
+            tail = f"{_pct_cell(d)}"
+            if d0.priced:
+                tail += f"   {_delta_cell(d, cur)}/run"
+                if d.usd_per_month_delta is not None:
+                    tail += (
+                        f"   {_money(d.usd_per_month_delta, cur, signed=True)}/month "
+                        f"({d.runs_per_month} runs)"
+                    )
             lines.append(
                 f"  {d.name}{flag_str}: "
                 f"{humanize_bytes(d.bytes_baseline)} → {humanize_bytes(d.bytes_current)}   "
@@ -184,8 +182,10 @@ def render_markdown(report: Report) -> str:
                 f"{humanize_bytes(d.bytes_current)} | {_pct_cell(d)} |"
             )
     elif diff:
-        out.append("| Model | Baseline | This change | Δ / run | Δ / month |")
-        out.append("|---|--:|--:|--:|--:|")
+        # `Δ %` leads the deltas and appears in both shapes, so the unpriced table is
+        # this one minus its money columns rather than a differently-shaped table.
+        out.append("| Model | Baseline | This change | Δ % | Δ / run | Δ / month |")
+        out.append("|---|--:|--:|--:|--:|--:|")
         for d in report.deltas:
             month = (
                 _money(d.usd_per_month_delta, cur, signed=True)
@@ -194,7 +194,8 @@ def render_markdown(report: Report) -> str:
             )
             out.append(
                 f"| {_md_name(d)} | {humanize_bytes(d.bytes_baseline)} | "
-                f"{humanize_bytes(d.bytes_current)} | {_delta_cell(d, cur)} | {month} |"
+                f"{humanize_bytes(d.bytes_current)} | {_pct_cell(d)} | "
+                f"{_delta_cell(d, cur)} | {month} |"
             )
     elif not d0.priced:
         out.append("| Model | Scanned |")

@@ -233,3 +233,29 @@ def test_json_states_currency_and_whether_anything_was_priced():
 
     unpriced = json.loads(report.render_json(_unpriced_report()))
     assert unpriced["pricing"]["priced"] is False
+
+
+def _header_of(md: str) -> list[str]:
+    line = next(ln for ln in md.splitlines() if ln.startswith("| Model |"))
+    return [c.strip() for c in line.strip("|").split("|")]
+
+
+def test_unpriced_diff_table_is_the_priced_one_minus_its_money_columns():
+    """The two shapes must nest, not diverge.
+
+    `Δ %` needs no currency, so it appears in both. Anything the unpriced table
+    shows must therefore also be in the priced table, in the same order — if the
+    two ever drift into differently-shaped tables, this fails.
+    """
+    priced = _header_of(report.render_markdown(_report()))
+    unpriced = _header_of(report.render_markdown(_unpriced_report()))
+    assert priced == ["Model", "Baseline", "This change", "Δ %", "Δ / run", "Δ / month"]
+    assert unpriced == ["Model", "Baseline", "This change", "Δ %"]
+    assert priced[: len(unpriced)] == unpriced  # a strict prefix: nested, not divergent
+
+
+def test_terminal_reports_the_same_figures_as_markdown_in_both_shapes():
+    # percentage present either way; money only when priced
+    assert "+350%" in report.render_terminal(_unpriced_report())
+    priced_out = report.render_terminal(_report())
+    assert "%" in priced_out and "USD 18.19" in priced_out

@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--format json` is unaffected — its `usd_*` field names are a published contract
   and keep their names — and it gains `pricing.currency` and `pricing.priced`.
 
+- **Diff reports now show percentage growth (`Δ %`) alongside the amounts.** It is
+  often the quicker read for spotting a regression, and it is the threshold most
+  teams set first. A model with no baseline (a new one) shows `—`, since there is
+  nothing to take a ratio against.
+
 - **A rate of `0` now drops money from reports entirely.** Setting
   `pricing.usd_per_tib: 0.00` is the documented way to run under capacity/Editions
   (slot) pricing, where there is no per-byte price and bytes scanned is a work
