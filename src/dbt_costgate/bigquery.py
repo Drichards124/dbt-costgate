@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The one network edge: BigQuery dry-run, behind a ``DryRunner`` protocol.
 
-costgate's only warehouse interaction. `dryRun=true` executes nothing, reads no
+dbt-costgate's only warehouse interaction. `dryRun=true` executes nothing, reads no
 table data, and is never billed. Credentials are never handled here — the client
 resolves them through Application Default Credentials, exactly like dbt-bigquery.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from costgate.models import ErrorKind
+from dbt_costgate.models import ErrorKind
 
 
 @dataclass
@@ -31,7 +31,7 @@ class DryRunner(Protocol):
 
 
 def categorize(exc: Exception, self_relation: str | None) -> tuple[ErrorKind, str]:
-    """Map a BigQuery client exception to a costgate error kind.
+    """Map a BigQuery client exception to a dbt-costgate error kind.
 
     Matches on exception type name and message rather than importing google
     exception classes, so the pure test suite can exercise it with stand-ins.

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from conftest import FakeDryRunner, make_manifest, make_node
-from costgate import artifacts, estimate
-from costgate.config import Config
-from costgate.models import TIB, ErrorKind
-from costgate.pricing import PricingTable
+from dbt_costgate import artifacts, estimate
+from dbt_costgate.config import Config
+from dbt_costgate.models import TIB, ErrorKind
+from dbt_costgate.pricing import PricingTable
 
 
 def _nodes(*specs):

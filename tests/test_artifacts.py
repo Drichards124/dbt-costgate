@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from conftest import make_macro, make_manifest, make_node, write_target
-from costgate import artifacts
-from costgate.artifacts import ArtifactError
-from costgate.models import EstimateBasis
+from dbt_costgate import artifacts
+from dbt_costgate.artifacts import ArtifactError
+from dbt_costgate.models import EstimateBasis
 
 
 def test_node_filtering_excludes_noncost_and_python_and_ephemeral():

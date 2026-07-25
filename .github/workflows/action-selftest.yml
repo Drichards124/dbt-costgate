@@ -2,7 +2,7 @@
 name: Action self-test
 
 # Exercises action.yml end to end without BigQuery or the real GitHub API: a
-# shimmed `costgate` drives each exit code (writing no report on exit 2, as the
+# shimmed `dbt-costgate` drives each exit code (writing no report on exit 2, as the
 # real CLI does) and a shimmed `gh` records the comment calls. Verifies the parts
 # unit tests can't reach — input plumbing, exit-code propagation, and the
 # synthesized-body path — while tests/test_sticky_comment.py covers the upsert.
@@ -40,7 +40,7 @@ jobs:
 
       - name: Put the test doubles ahead of everything on PATH
         run: |
-          chmod +x "$GITHUB_WORKSPACE/.github/selftest/costgate" "$GITHUB_WORKSPACE/.github/selftest/gh"
+          chmod +x "$GITHUB_WORKSPACE/.github/selftest/dbt-costgate" "$GITHUB_WORKSPACE/.github/selftest/gh"
           echo "$GITHUB_WORKSPACE/.github/selftest" >>"$GITHUB_PATH"
 
       # --- Case A: pass, no existing sticky → POST, step succeeds ---

@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeDryRunner, make_manifest, make_node, write_target
-from costgate import against
-from costgate.against import AgainstError
-from costgate.cli import main
-from costgate.models import TIB
+from dbt_costgate import against
+from dbt_costgate.against import AgainstError
+from dbt_costgate.cli import main
+from dbt_costgate.models import TIB
 
 
 def _git(repo: Path, *args: str) -> str:

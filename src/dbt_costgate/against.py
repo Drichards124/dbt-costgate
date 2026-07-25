@@ -23,8 +23,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from costgate import artifacts
-from costgate.models import ModelNode
+from dbt_costgate import artifacts
+from dbt_costgate.models import ModelNode
 
 # Third-party packages live here and are gitignored, so a fresh worktree checkout
 # omits them. dbt_modules is the pre-1.0 name; both are handled for old projects.
@@ -128,7 +128,7 @@ def compiled_baseline(
 
     # mkdtemp creates the parent; the worktree path itself must not exist yet, as
     # `git worktree add` creates it.
-    tmp_parent = Path(tempfile.mkdtemp(prefix="costgate-against-"))
+    tmp_parent = Path(tempfile.mkdtemp(prefix="dbt-costgate-against-"))
     worktree = tmp_parent / "wt"
     try:
         _git(project_dir, "worktree", "add", "--detach", "--quiet", str(worktree), ref)

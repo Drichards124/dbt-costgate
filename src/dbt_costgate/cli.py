@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Command-line entry point for costgate."""
+"""Command-line entry point for dbt-costgate."""
 
 from __future__ import annotations
 
@@ -8,22 +8,22 @@ import json
 import sys
 from pathlib import Path
 
-from costgate import __version__, against, artifacts, estimate, gitdiff, policy, report
-from costgate.against import AgainstError
-from costgate.artifacts import ArtifactError
-from costgate.bigquery import BigQueryDryRunner, DryRunner
-from costgate.config import CONFIG_REFERENCE, Config
-from costgate.gitdiff import GitDiffError
-from costgate.models import PricingDisclosure, Report
-from costgate.pricing import PricingTable
+from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, policy, report
+from dbt_costgate.against import AgainstError
+from dbt_costgate.artifacts import ArtifactError
+from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
+from dbt_costgate.config import CONFIG_REFERENCE, Config
+from dbt_costgate.gitdiff import GitDiffError
+from dbt_costgate.models import PricingDisclosure, Report
+from dbt_costgate.pricing import PricingTable
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="costgate",
+        prog="dbt-costgate",
         description="BigQuery cost gate for dbt pull requests.",
     )
-    parser.add_argument("--version", action="version", version=f"costgate {__version__}")
+    parser.add_argument("--version", action="version", version=f"dbt-costgate {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     check = sub.add_parser(
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--baseline-target",
         help=(
-            "Name of a baseline defined under `baselines:` in .costgate.yml "
+            "Name of a baseline defined under `baselines:` in .dbt-costgate.yml "
             "(each is a manifest path or a git ref). Mutually exclusive with "
             "--baseline/--against; defaults to the config's default_baseline."
         ),
@@ -77,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--base", help="Git ref to diff against for local selection (default: main)."
     )
-    check.add_argument("--config", help="Path to a costgate config file (default: .costgate.yml).")
+    check.add_argument(
+        "--config", help="Path to a dbt-costgate config file (default: .dbt-costgate.yml)."
+    )
     check.add_argument("--format", choices=["terminal", "markdown", "json"], help="Output format.")
     check.add_argument("--output", help="Write the report to this file instead of stdout.")
     check.add_argument("--threads", type=int, default=8, help="Parallel dry-runs (default: 8).")
@@ -103,10 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     cfg = sub.add_parser(
         "config",
-        help="List every .costgate.yml key with a plain-English explanation.",
+        help="List every .dbt-costgate.yml key with a plain-English explanation.",
         description=(
-            "Print the full configuration reference — every key costgate reads "
-            "from .costgate.yml, its type, default, and what it does. Use "
+            "Print the full configuration reference — every key dbt-costgate reads "
+            "from .dbt-costgate.yml, its type, default, and what it does. Use "
             "--format json for a machine-readable list."
         ),
     )
@@ -182,7 +184,7 @@ def _select(
     paths = gitdiff.changed_paths(project_dir, args.base)
     if artifacts.touches_project_config(paths):
         print(
-            "costgate: dbt_project.yml changed — project-wide config can't be traced "
+            "dbt-costgate: dbt_project.yml changed — project-wide config can't be traced "
             "to individual models; price the affected ones with --select.",
             file=sys.stderr,
         )
@@ -212,7 +214,7 @@ def _resolve_baseline(args: argparse.Namespace, config: Config) -> tuple[str | N
         known = ", ".join(sorted(config.baselines)) or "none"
         raise _UsageError(
             f"baseline target {name!r} is not defined under `baselines:` in "
-            f".costgate.yml (defined: {known})."
+            f".dbt-costgate.yml (defined: {known})."
         )
     if bool(target.manifest) == bool(target.against):
         raise _UsageError(
@@ -232,7 +234,10 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     if args.project_dir:
         project_dir = Path(args.project_dir).resolve()
         if not project_dir.is_dir():
-            print(f"costgate: --project-dir does not exist: {args.project_dir}", file=sys.stderr)
+            print(
+                f"dbt-costgate: --project-dir does not exist: {args.project_dir}",
+                file=sys.stderr,
+            )
             return policy.EXIT_OPERATIONAL
 
     config = Config.load(Path(args.config) if args.config else None, project_dir)
@@ -243,13 +248,13 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     try:
         eff_baseline, eff_against = _resolve_baseline(args, config)
     except _UsageError as exc:
-        print(f"costgate: {exc}", file=sys.stderr)
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
 
     try:
         current_manifest = artifacts.load_manifest(current_arg)
     except ArtifactError as exc:
-        print(f"costgate: {exc}", file=sys.stderr)
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
     current_nodes = artifacts.model_nodes(current_manifest)
     macros = artifacts.macro_index(current_manifest)
@@ -259,7 +264,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         try:
             baseline_manifest = artifacts.load_manifest(Path(eff_baseline))
         except ArtifactError as exc:
-            print(f"costgate: {exc}", file=sys.stderr)
+            print(f"dbt-costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
         baseline_nodes = artifacts.model_nodes(baseline_manifest)
     elif eff_against:
@@ -267,7 +272,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         # can't be dry-run anyway.
         if not artifacts.has_any_compiled_code(current_nodes):
             print(
-                "costgate: no compiled SQL in the current target — run `dbt compile` "
+                "dbt-costgate: no compiled SQL in the current target — run `dbt compile` "
                 "on your branch before --against <ref>.",
                 file=sys.stderr,
             )
@@ -275,12 +280,12 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         try:
             baseline_nodes = against.compiled_baseline(eff_against, project_dir)
         except AgainstError as exc:
-            print(f"costgate: {exc}", file=sys.stderr)
+            print(f"dbt-costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
 
     if baseline_nodes is not None and not artifacts.has_any_compiled_code(baseline_nodes):
         print(
-            "costgate: the baseline manifest has no compiled SQL — it must be "
+            "dbt-costgate: the baseline manifest has no compiled SQL — it must be "
             "produced by `dbt compile` (a `dbt parse` manifest won't work).",
             file=sys.stderr,
         )
@@ -293,13 +298,13 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         try:
             renames = artifacts.resolve_renames(config.renames, current_nodes, baseline_nodes)
         except ArtifactError as exc:
-            print(f"costgate: {exc}", file=sys.stderr)
+            print(f"dbt-costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
 
     try:
         selected = _select(args, current_nodes, baseline_nodes, project_dir, renames, macros)
     except GitDiffError as exc:
-        print(f"costgate: {exc}", file=sys.stderr)
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
 
     # Models the diff picked up from their compiled SQL alone; each carries a
@@ -326,7 +331,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
 
     if selected and estimate.has_only_operational_failures(estimates):
         print(
-            "costgate: could not estimate any model (check credentials/permissions). "
+            "dbt-costgate: could not estimate any model (check credentials/permissions). "
             "Try `gcloud auth application-default login`.",
             file=sys.stderr,
         )
@@ -366,7 +371,7 @@ def run_config(args: argparse.Namespace) -> int:
 
     key_w = max(len(f.key) for f in CONFIG_REFERENCE)
     type_w = max(len(f.type_label) for f in CONFIG_REFERENCE)
-    print("costgate configuration keys (.costgate.yml). CLI flags override the file.\n")
+    print("dbt-costgate configuration keys (.dbt-costgate.yml). CLI flags override the file.\n")
     for f in CONFIG_REFERENCE:
         default = "none" if f.default is None else str(f.default)
         print(f"{f.key.ljust(key_w)}  {f.type_label.ljust(type_w)}  default: {default}")

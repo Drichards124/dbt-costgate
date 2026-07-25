@@ -37,7 +37,7 @@ class ErrorKind(str, Enum):
 
     @property
     def is_operational(self) -> bool:
-        """Operational failures indicate costgate (or auth/permissions) could not
+        """Operational failures indicate dbt-costgate (or auth/permissions) could not
         run — as opposed to an expected, model-specific condition."""
         return self in {
             ErrorKind.PERMISSION,
@@ -49,7 +49,7 @@ class ErrorKind(str, Enum):
 
 @dataclass
 class ModelNode:
-    """The subset of a dbt manifest model node that costgate reads."""
+    """The subset of a dbt manifest model node that dbt-costgate reads."""
 
     unique_id: str
     name: str

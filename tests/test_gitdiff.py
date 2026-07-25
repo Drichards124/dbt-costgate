@@ -6,8 +6,8 @@ import pytest
 from conftest import git as _git
 from conftest import init_repo as _init_repo
 from conftest import make_manifest, make_node
-from costgate import artifacts, gitdiff
-from costgate.gitdiff import GitDiffError
+from dbt_costgate import artifacts, gitdiff
+from dbt_costgate.gitdiff import GitDiffError
 
 
 def test_changed_paths_map_to_the_changed_model(tmp_path: Path):

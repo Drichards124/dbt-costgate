@@ -34,7 +34,7 @@ if [ "$is_list" = "1" ]; then
 fi
 marker=no
 if [ -n "$body" ] && [ -f "$body" ]; then
-  grep -qF '<!-- costgate-sticky -->' "$body" && marker=yes
+  grep -qF '<!-- dbt-costgate-sticky -->' "$body" && marker=yes
 fi
 printf '%s\t%s\tmarker=%s\n' "$method" "$url" "$marker" >>"${FAKE_GH_LOG:-/dev/null}"
 exit 0
