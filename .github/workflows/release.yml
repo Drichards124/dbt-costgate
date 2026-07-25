@@ -70,3 +70,39 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "dbt-costgate $GITHUB_REF_NAME" \
             --notes-file RELEASE_NOTES.md
+
+      # Hand the distributions to the publish job. SHA256SUMS is deliberately not
+      # included: PyPI rejects anything in the upload directory that isn't a
+      # distribution, and it belongs to the GitHub Release, not to PyPI.
+      - name: Upload distributions for the PyPI job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # Publishing runs only after the GitHub Release exists, so a PyPI outage leaves
+  # a complete, downloadable release behind rather than nothing at all.
+  pypi:
+    name: Publish to PyPI
+    needs: release
+    runs-on: ubuntu-latest
+    environment: pypi
+    # Trusted publishing (OIDC): GitHub mints a short-lived identity token that
+    # PyPI verifies against the registered publisher. There is no API token to
+    # store, rotate, or leak. Declared here rather than at the top of the file so
+    # only this job can request it — and note that a job-level block replaces the
+    # workflow default, so this job deliberately has no `contents: write`.
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions built above
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
