@@ -36,7 +36,7 @@ surface seriously. By design:
   Any way for secret material to reach a report without explicit opt-in is a
   vulnerability.
 - There is no telemetry and no phone-home. Any network call other than the
-  BigQuery API (or the opt-in Cloud Billing Catalog API) is a vulnerability.
+  BigQuery API is a vulnerability.
 
 Also in scope: workflow patterns in our documentation that would expose
 secrets to fork pull requests (`pull_request_target` misuse), and

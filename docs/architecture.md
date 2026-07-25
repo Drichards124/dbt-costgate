@@ -63,8 +63,7 @@ PR working tree  ───┘                                          │
 2. No credential acceptance, storage, or logging — ADC only.
 3. Reports exclude compiled SQL by default (secrets can be templated in).
 4. Every dollar figure is traceable: region + rate + rate source in output.
-5. No telemetry; BigQuery API (and opt-in Billing Catalog API) are the only
-   network endpoints.
+5. No telemetry; the BigQuery API is the only network endpoint.
 6. Documented CI patterns are fork-safe (`pull_request` trigger; secrets are
    never exposed to fork PRs).
 
