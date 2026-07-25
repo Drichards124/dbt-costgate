@@ -6,6 +6,20 @@ name: Marketplace drift
 # last had the box ticked, so the listing can advertise old code indefinitely with
 # nothing anywhere reporting it. No REST API field exposes this, so the only way to
 # catch the drift is to read the listing and compare it to the latest release.
+#
+# READ `releases[]`, NEVER `latestRelease`. The listing page embeds both, and they
+# mean different things:
+#
+#   "latestRelease" : {"tagName":"v0.8.0"}          <- mirrors the REPO's latest release
+#   "releases"      : [{"tagName":"v0.7.1"}, ...]   <- what is actually PUBLISHED here
+#
+# The first version of this check read `latestRelease` and compared it against
+# `gh release view --json tagName`. Those are the same value by construction, so
+# it compared the repo's latest release against itself and passed unconditionally
+# — green every week while the listing sat a release behind. It was verified
+# against a listing known to be stale and still reported a match. A check that
+# reports success because it has nothing to measure is worse than no check, since
+# the green tick is read as coverage.
 on:
   schedule:
     - cron: "17 9 * * 1" # Mondays, 09:17 UTC
@@ -29,28 +43,31 @@ jobs:
           latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
 
           # The listing page embeds its release data as JSON; that is a far more
-          # stable anchor than the rendered HTML around it.
-          listed="$(curl -sL "$LISTING" \
-            | grep -oE '"latestRelease":\{"tagName":"[^"]+"' \
+          # stable anchor than the rendered HTML around it. `[^]]*` is safe because
+          # the array holds flat objects with no nested brackets.
+          published="$(curl -sL "$LISTING" \
+            | grep -oE '"releases":\[[^]]*\]' \
             | head -1 \
             | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)"
 
-          if [ -z "$listed" ]; then
-            echo "::error::Could not read a version from $LISTING."
+          if [ -z "$published" ]; then
+            echo "::error::Could not read any published version from $LISTING."
             echo "The page structure has probably changed, so this check can no longer"
             echo "tell a stale listing from a current one. Failing loudly rather than"
             echo "passing silently — update the extraction in this workflow."
             exit 1
           fi
 
-          echo "latest release : $latest"
-          echo "marketplace    : $listed"
+          echo "latest release       : $latest"
+          echo "published to listing : $(echo "$published" | tr '\n' ' ')"
 
-          if [ "$latest" != "$listed" ]; then
-            echo "::error::Marketplace is stale — it lists $listed but the latest release is $latest."
+          if ! printf '%s\n' "$published" | grep -qxF "$latest"; then
+            echo "::error::Marketplace is stale — the listing does not publish $latest."
             echo "Fix it by editing the release and re-ticking the Marketplace box:"
             echo "  https://github.com/$GITHUB_REPOSITORY/releases/edit/$latest"
+            echo "Use the release EDITOR, never the repo banner's 'Draft a release' —"
+            echo "that starts a new release and fails release.yml twice."
             exit 1
           fi
 
-          echo "Listing matches the latest release."
+          echo "Listing publishes the latest release."
