@@ -14,6 +14,20 @@ from enum import Enum
 TIB = 2**40
 
 
+def format_money(value: float | None, currency: str, *, signed: bool = False) -> str:
+    """Render an amount with its ISO 4217 code: `USD 6.25`, `USD +43.75`, `USD -43.75`.
+
+    Lives here, beside `TIB`, because both the report and the threshold breach
+    messages render money and the two must agree. A second copy of the format
+    string in `policy.py` is exactly how they drifted apart before — the sign
+    moved onto the number in one place and not the other.
+    """
+    if value is None:
+        return "—"
+    # The sign belongs to the number, not to the currency code.
+    return f"{currency} {value:+,.2f}" if signed else f"{currency} {value:,.2f}"
+
+
 class EstimateBasis(str, Enum):
     """How a model's bytes were measured — surfaced so a diff never silently
     compares two different query shapes (see the basis-mismatch guard)."""
@@ -200,3 +214,40 @@ class Report:
     disclosure: PricingDisclosure
     verdict: Verdict
     mode: str  # "diff" | "absolute"
+
+    # --- net impact -------------------------------------------------------
+    # The per-model rows say what each model did; nothing said what the change
+    # did overall, so a reviewer had to add a column up by hand — and a change
+    # that *lowers* cost read as merely "not a failure". These are a
+    # measurement, not a verdict: models the config excluded from gating still
+    # spend money, so they count here even though they cannot fail the gate.
+
+    @property
+    def estimated(self) -> list[CostDelta]:
+        """Models with a usable before/after. Bytes, not dollars, decide this —
+        an unpriced run has real byte deltas and zero-valued money ones."""
+        return [d for d in self.deltas if d.bytes_delta is not None]
+
+    @property
+    def net_bytes(self) -> int | None:
+        rows = self.estimated
+        return sum(d.bytes_delta or 0 for d in rows) if rows else None
+
+    @property
+    def net_usd_per_run(self) -> float | None:
+        rows = self.estimated
+        return sum(d.usd_per_run_delta or 0.0 for d in rows) if rows else None
+
+    @property
+    def net_usd_per_month(self) -> float | None:
+        """None unless *every* estimated model contributed a monthly figure — a
+        partial sum across models with and without a run frequency would read as
+        a total while quietly omitting some of them."""
+        values = [d.usd_per_month_delta for d in self.estimated]
+        if not values or any(v is None for v in values):
+            return None
+        return sum(values)
+
+    @property
+    def unestimated_count(self) -> int:
+        return len(self.deltas) - len(self.estimated)
