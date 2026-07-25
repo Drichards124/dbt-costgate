@@ -406,14 +406,14 @@ jobs:
   dbt-costgate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       # Your dbt setup + keyless auth to BigQuery (google-github-actions/auth).
       - run: pip install dbt-bigquery
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
