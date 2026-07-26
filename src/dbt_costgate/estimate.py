@@ -12,8 +12,13 @@ from pathlib import Path
 from dbt_costgate import artifacts
 from dbt_costgate.bigquery import DryRunner
 from dbt_costgate.config import Config
-from dbt_costgate.models import CostDelta, ModelEstimate, ModelNode
+from dbt_costgate.models import ERROR_KIND_REASONS, CostDelta, ModelEstimate, ModelNode
 from dbt_costgate.pricing import PricingTable
+
+# Not a warehouse failure but a local one, so it carries no ErrorKind. Named
+# because _not_estimated_reason must recognise it explicitly: anything else
+# arriving without a kind degrades to "not estimated" rather than being printed.
+NO_COMPILED_SQL = "no compiled SQL for the current version (run `dbt compile`)"
 
 
 def estimate_models(
@@ -76,7 +81,7 @@ def _estimate_one(
 
     if not current_sql:
         est.error_kind = None
-        est.error_detail = "no compiled SQL for the current version (run `dbt compile`)"
+        est.error_detail = NO_COMPILED_SQL
         est.gateable = False
         return est
 
@@ -173,17 +178,17 @@ def build_deltas(
 
 
 def _not_estimated_reason(est: ModelEstimate) -> str:
-    from dbt_costgate.models import ErrorKind
+    """The reason a *report* may show. Never includes ``error_detail``.
 
-    if est.error_kind == ErrorKind.DESTINATION_MISSING:
-        return (
-            "not estimated — incremental target not built; compile with "
-            "--defer --state in a fresh target for the full-refresh estimate"
-        )
+    ``error_detail`` holds BigQuery's own message, which quotes the query it was
+    given — and compiled SQL can embed secrets templated via ``env_var()``/vars.
+    Reports become pull-request comments, so the message is named by kind here
+    and printed raw only to stderr (see ``cli._log_error_details``).
+    """
     if est.error_kind is not None:
-        return f"not estimated — {est.error_kind.value}: {est.error_detail}"
-    if est.error_detail:
-        return est.error_detail
+        return f"not estimated — {ERROR_KIND_REASONS[est.error_kind]}"
+    if est.error_detail == NO_COMPILED_SQL:
+        return NO_COMPILED_SQL
     return "not estimated"
 
 

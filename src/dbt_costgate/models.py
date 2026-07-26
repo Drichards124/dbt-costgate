@@ -74,6 +74,26 @@ class ErrorKind(str, Enum):
         }
 
 
+# Why a model could not be estimated, in words a report is allowed to print.
+# BigQuery's own message is deliberately absent: it quotes the query it was given,
+# and compiled SQL can embed secrets templated via env_var()/vars — the same reason
+# SECURITY.md keeps compiled SQL out of reports. Reports reach pull-request
+# comments, so the raw message goes to stderr instead, where it stays in the job
+# log. Every kind must appear here (asserted in tests): a kind with no entry would
+# otherwise fall back to printing the raw message again.
+ERROR_KIND_REASONS: dict[ErrorKind, str] = {
+    ErrorKind.DESTINATION_MISSING: (
+        "incremental target not built; compile with --defer --state in a fresh "
+        "target for the full-refresh estimate"
+    ),
+    ErrorKind.UPSTREAM_MISSING: "an upstream table it reads has not been materialized",
+    ErrorKind.PERMISSION: "BigQuery denied permission for the dry-run",
+    ErrorKind.INVALID_SQL: "BigQuery rejected the compiled SQL",
+    ErrorKind.TRANSIENT: "BigQuery was unavailable and the retries ran out",
+    ErrorKind.OTHER: "the dry-run failed",
+}
+
+
 @dataclass
 class ModelNode:
     """The subset of a dbt manifest model node that dbt-costgate reads."""

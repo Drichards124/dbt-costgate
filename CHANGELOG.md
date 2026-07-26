@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
+## [0.10.0] - 2026-07-26
+
+### Security
+
+- **Reports no longer reproduce BigQuery's error message.** A model that could
+  not be dry-run is now described by what went wrong, not by what BigQuery said:
+
+  ```
+  > • **fct_orders** — not estimated — BigQuery rejected the compiled SQL
+  ```
+
+  where it previously printed the message verbatim. BigQuery quotes the query it
+  was given, and compiled SQL can embed secrets templated through `env_var()` or
+  vars — the same reason reports have always excluded compiled SQL. Because a
+  report becomes a pull-request comment, that message could carry query text,
+  dataset and table names, and the service-account identity into a comment that
+  is public on a public repository.
+
+  **The full message is still available**, printed to stderr and so kept in the
+  job log:
+
+  ```
+  dbt-costgate: fct_orders: invalid_sql: 400 Syntax error: Unexpected ...
+  ```
+
+  This changes report text in all three formats, including the JSON `error`
+  field. If you match on that string, match on the new wording — or read
+  `models[].error` alongside the job log rather than parsing the warehouse
+  message out of a comment.
+
+### Fixed
+
+- **A report long enough to be truncated now posts.** The sticky comment is
+  capped at GitHub's size limit; the cut could land inside a multi-byte
+  character, and the resulting comment was rejected. It is now shortened to a
+  whole line.
+
 ## [0.9.0] - 2026-07-26
 
 ### Added

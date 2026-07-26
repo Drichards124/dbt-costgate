@@ -33,8 +33,11 @@ surface seriously. By design:
   that surfaces a token or key material is a vulnerability.
 - Reports (PR comments, terminal output, JSON) intentionally exclude compiled
   SQL, because compiled SQL can embed secrets templated via `env_var()`/vars.
-  Any way for secret material to reach a report without explicit opt-in is a
-  vulnerability.
+  That exclusion covers the warehouse's own error text too, since BigQuery
+  quotes the query it was given: a failed model is named by *what* went wrong,
+  and the message itself goes to stderr, which stays in the job log rather than
+  in a pull-request comment. Any way for secret material to reach a report
+  without explicit opt-in is a vulnerability.
 - There is no telemetry and no phone-home. Any network call other than the
   BigQuery API is a vulnerability.
 

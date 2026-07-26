@@ -15,7 +15,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # This is the one job that holds `contents: write`. Without this, checkout
+      # leaves that token in .git/config for every later step to read.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -110,8 +114,14 @@ jobs:
           name: dist
           path: dist
 
+      # Pinned to a commit, not to `release/v1`. That is a *branch*: it moves on
+      # every upstream push, so whatever it points at next runs here holding this
+      # project's PyPI publishing identity. A branch ref is also the one thing
+      # Dependabot cannot propose an update for, which made this the only
+      # dependency in the repository that nothing watched. The comment is what
+      # Dependabot reads to bump the pin.
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
 
       # Publishing to the Marketplace is a UI action that CI cannot perform, so the
       # best it can do is make forgetting loud at the moment it is actionable.
