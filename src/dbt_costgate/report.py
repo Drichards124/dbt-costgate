@@ -253,6 +253,8 @@ def _tag_cell(d: CostDelta) -> str:
     flags = []
     if d.is_new:
         flags.append("new")
+    if d.is_deleted:
+        flags.append("deleted")
     tag = _row_tag(d)
     if tag:
         flags.append(tag)
@@ -592,6 +594,8 @@ def _md_name(d: CostDelta) -> str:
     tags = []
     if d.is_new:
         tags.append("new")
+    if d.is_deleted:
+        tags.append("deleted")
     tag = _row_tag(d)
     if tag:
         tags.append(tag)
@@ -638,6 +642,7 @@ def render_json(report: Report) -> str:
                 "name": d.name,
                 "unique_id": d.unique_id,
                 "is_incremental": d.is_incremental,
+                "is_deleted": d.is_deleted,
                 # Which shape was dry-run. `is_incremental` is a fact about the
                 # model; this is a fact about the number beside it, and only this
                 # one says whether that number is a rebuild or a single run.

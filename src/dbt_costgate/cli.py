@@ -7,6 +7,7 @@ import argparse
 import difflib
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dbt_costgate import (
@@ -269,9 +270,31 @@ def _unmatched_selection(missing, current_nodes, out_of_scope: dict[str, str]) -
     return "--select matched nothing for: " + "; ".join(parts) + "."
 
 
+@dataclass
+class _Selection:
+    """What `_select` worked out.
+
+    `notes` explains, per unique_id, why a model was selected when its own file
+    was not what changed. `paths` is the git diff the local path used, kept so
+    the caller can say which out-of-scope nodes a change touched — and `None`
+    when selection did not come from a diff at all.
+    """
+
+    uids: list[str]
+    notes: dict[str, str] = field(default_factory=dict)
+    paths: list[str] | None = None
+
+
 def _select(
-    args, current_nodes, baseline_nodes, project_dir, renames=None, macros=None, out_of_scope=None
-) -> list[str]:
+    args,
+    current_nodes,
+    baseline_nodes,
+    project_dir,
+    renames=None,
+    macros=None,
+    out_of_scope=None,
+    ephemeral=None,
+) -> _Selection:
     out_of_scope = out_of_scope or {}
     if args.select:
         wanted = {s.strip() for s in args.select.split(",") if s.strip()}
@@ -287,9 +310,9 @@ def _select(
         missing = sorted(wanted - matched)
         if missing:
             raise _UsageError(_unmatched_selection(missing, current_nodes, out_of_scope))
-        return selected
+        return _Selection(selected)
     if baseline_nodes is not None:
-        return artifacts.select_changed(baseline_nodes, current_nodes, renames)
+        return _Selection(artifacts.select_changed(baseline_nodes, current_nodes, renames))
     paths = gitdiff.changed_paths(project_dir, args.base)
     if artifacts.touches_project_config(paths):
         print(
@@ -297,7 +320,8 @@ def _select(
             "to individual models; price the affected ones with --select.",
             file=sys.stderr,
         )
-    return artifacts.select_by_paths(current_nodes, paths, macros)
+    uids, notes = artifacts.select_by_paths(current_nodes, paths, macros, ephemeral)
+    return _Selection(uids, notes, paths)
 
 
 class _UsageError(Exception):
@@ -369,6 +393,11 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     except ArtifactError as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
+    adapter_problem = artifacts.adapter_problem(current_manifest)
+    if adapter_problem:
+        print(f"dbt-costgate: {adapter_problem}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
+
     current_nodes = artifacts.model_nodes(current_manifest)
     macros = artifacts.macro_index(current_manifest)
     out_of_scope = artifacts.out_of_scope_nodes(current_manifest)
@@ -416,18 +445,40 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             return policy.EXIT_OPERATIONAL
 
     try:
-        selected = _select(
-            args, current_nodes, baseline_nodes, project_dir, renames, macros, out_of_scope
+        selection = _select(
+            args,
+            current_nodes,
+            baseline_nodes,
+            project_dir,
+            renames,
+            macros,
+            out_of_scope,
+            artifacts.ephemeral_index(current_manifest),
         )
     except (GitDiffError, _UsageError) as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
+    selected = selection.uids
 
     # Models the diff picked up from their compiled SQL alone; each carries a
-    # warning saying so, since the change is upstream of the model's own file.
-    indirect: set[str] = set()
+    # note saying so, since the change is upstream of the model's own file.
     if baseline_nodes is not None and not args.select:
-        indirect = artifacts.indirect_changes(baseline_nodes, current_nodes)
+        for uid in artifacts.indirect_changes(baseline_nodes, current_nodes):
+            selection.notes[uid] = (
+                "compiled SQL changed but the model file didn't — an upstream macro "
+                "or a config change"
+            )
+
+    # "Nothing to estimate" and "what you changed is not something I price" are
+    # different answers and used to read identically.
+    if not selected:
+        touched = artifacts.changed_out_of_scope(
+            current_manifest,
+            baseline_manifest if baseline_nodes is not None and eff_baseline else None,
+            selection.paths,
+        )
+        for name, reason in sorted(touched.items()):
+            print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
 
     diff_mode = baseline_nodes is not None
     if runner is None:
@@ -442,7 +493,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         diff_mode=diff_mode,
         threads=args.threads,
         renames=renames,
-        indirect=indirect,
+        notes=selection.notes,
     )
 
     _log_error_details(estimates)

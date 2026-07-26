@@ -95,8 +95,10 @@ def test_seed_and_snapshot_resource_types_are_dropped():
     assert list(model_nodes(manifest)) == ["model.pkg.m"]
 
 
-def test_a_materialized_view_is_priced_exactly_like_a_view_today(tmp_path: Path, capsys):
-    """Documents the status quo so the day it changes, this test says so."""
+def test_a_materialized_view_is_priced_like_a_view_but_says_so(tmp_path: Path, capsys):
+    """The figure really is a view's figure — one build, one scan. What changed is
+    that the row now says the recurring cost is higher, which is what a reader of
+    a materialized-view row is actually asking about."""
     target = write_target(
         tmp_path,
         make_manifest(
@@ -117,7 +119,8 @@ def test_a_materialized_view_is_priced_exactly_like_a_view_today(tmp_path: Path,
     by_name = {m["name"]: m for m in payload["models"]}
     assert by_name["mv"]["basis"] == by_name["v"]["basis"] == "direct"
     assert by_name["mv"]["usd_current"] == by_name["v"]["usd_current"]
-    assert by_name["mv"]["warnings"] == []
+    assert by_name["v"]["warnings"] == []
+    assert "each automatic refresh" in " ".join(by_name["mv"]["warnings"])
 
 
 # --------------------------------------------------------------------------
@@ -125,11 +128,6 @@ def test_a_materialized_view_is_priced_exactly_like_a_view_today(tmp_path: Path,
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F05: a materialized view auto-refreshes and bills each refresh, so a "
-    "one-off scan figure describes the wrong thing; it is reported with no caveat",
-)
 def test_a_materialized_view_says_its_figure_is_not_the_recurring_cost(tmp_path: Path, capsys):
     target = write_target(
         tmp_path,

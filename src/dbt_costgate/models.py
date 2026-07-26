@@ -91,9 +91,10 @@ class SkipReason(str, Enum):
     The two groups below are what tells them apart. `is_unchecked` is the line.
     """
 
-    # Policy: the user asked for this.
+    # Nothing to enforce here.
     EXCLUDED = "excluded"
     WARN_ONLY = "warn_only"
+    DELETED = "deleted"  # a removal can only lower cost, so no threshold applies
     # Failure: the gate wanted to check and could not.
     NO_COMPILED_SQL = "no_compiled_sql"
     DRY_RUN_FAILED = "dry_run_failed"
@@ -102,7 +103,7 @@ class SkipReason(str, Enum):
 
     @property
     def is_unchecked(self) -> bool:
-        return self not in (SkipReason.EXCLUDED, SkipReason.WARN_ONLY)
+        return self not in (SkipReason.EXCLUDED, SkipReason.WARN_ONLY, SkipReason.DELETED)
 
 
 # What a report says about a model the gate could not check. Plain language, and
@@ -203,6 +204,7 @@ class ModelEstimate:
     error_kind: ErrorKind | None = None
     error_detail: str | None = None
     is_new: bool = False
+    is_deleted: bool = False
     basis_baseline: EstimateBasis | None = None
     basis_current: EstimateBasis | None = None
     warnings: list[str] = field(default_factory=list)
@@ -301,6 +303,9 @@ class CostDelta:
     # kind*, and the gate needs the difference: a model the user excluded is a
     # decision, a model that could not be measured is a hole.
     skip_reason: SkipReason | None = None
+    # In the baseline and gone from the branch. `bytes_current` is 0, so the
+    # delta is the whole of what it used to scan — a saving.
+    is_deleted: bool = False
 
     @property
     def unchecked(self) -> bool:

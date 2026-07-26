@@ -81,6 +81,27 @@ def model_nodes(manifest: dict) -> dict[str, ModelNode]:
     return out
 
 
+def adapter_problem(manifest: dict) -> str | None:
+    """A message when this manifest was not compiled for BigQuery, else None.
+
+    Nothing read `metadata.adapter_type` at all, so pointing dbt-costgate at a
+    Snowflake, Postgres or duckdb project produced confident BigQuery dollar
+    figures for SQL BigQuery would never run — the worst kind of wrong answer,
+    because it looks exactly like a right one.
+
+    Absent metadata is allowed through: older manifests do not carry it, and
+    refusing to run on one would be a regression for no gain.
+    """
+    adapter = (manifest.get("metadata") or {}).get("adapter_type")
+    if not adapter or adapter == "bigquery":
+        return None
+    return (
+        f"this manifest was compiled for the {adapter} adapter. dbt-costgate estimates "
+        f"BigQuery costs from BigQuery dry-runs, so every figure it produced here would be "
+        f"a BigQuery price for SQL BigQuery is not going to run."
+    )
+
+
 def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
     """Nodes `model_nodes` drops, mapped to why — name -> reason.
 
@@ -107,6 +128,39 @@ def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
                 "the models that select from them, and the cost shows up there"
             )
     return out
+
+
+def changed_out_of_scope(
+    current: dict, baseline: dict | None = None, paths: list[str] | None = None
+) -> dict[str, str]:
+    """Out-of-scope nodes this change actually touched — name -> reason.
+
+    So that "nothing to estimate" and "the things you changed are not things I
+    price" stop looking identical. A seed-only or snapshot-only branch printed
+    the former in both local and baseline mode, and a snapshot really does run a
+    MERGE and really does scan bytes.
+    """
+    scope = out_of_scope_nodes(current)
+    if not scope:
+        return {}
+    changed_paths = set(paths or ())
+    base_nodes = (baseline or {}).get("nodes") or {}
+    touched: dict[str, str] = {}
+    for unique_id, node in (current.get("nodes") or {}).items():
+        name = node.get("name", unique_id)
+        if name not in scope:
+            continue
+        if baseline is not None:
+            base = base_nodes.get(unique_id)
+            if base is None or _raw_checksum(base) != _raw_checksum(node):
+                touched[name] = scope[name]
+        elif node.get("original_file_path") in changed_paths:
+            touched[name] = scope[name]
+    return touched
+
+
+def _raw_checksum(node: dict) -> str | None:
+    return (node.get("checksum") or {}).get("checksum")
 
 
 def has_any_compiled_code(nodes: dict[str, ModelNode]) -> bool:
@@ -176,10 +230,10 @@ def select_changed(
     current: dict[str, ModelNode],
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    """Models that were added, whose body changed (checksum differs), or whose
-    compiled SQL differs — the last catching config-only and macro-only changes,
-    which never touch the model's own file. A declared rename (``current_uid`` in
-    ``renames``) is always selected."""
+    """Models that were added, deleted, whose body changed (checksum differs), or
+    whose compiled SQL differs — the last catching config-only and macro-only
+    changes, which never touch the model's own file. A declared rename
+    (``current_uid`` in ``renames``) is always selected."""
     renames = renames or {}
     changed = []
     for uid, node in current.items():
@@ -193,6 +247,13 @@ def select_changed(
             changed.append(uid)
         elif _compiled_differs(base, node):
             changed.append(uid)
+    # Deletions. This used to walk the current manifest only, so removing a model
+    # — the most common deliberate cost reduction there is, and a story the README
+    # sells — produced no row and no credit: deleting a 411 GiB/run model reported
+    # "Net change: none". A renamed model's baseline is not a deletion; it is the
+    # other half of a pair already selected above.
+    renamed_baselines = set(renames.values())
+    changed.extend(uid for uid in baseline if uid not in current and uid not in renamed_baselines)
     return changed
 
 
@@ -254,17 +315,82 @@ def _patch_file(patch_path: str) -> str:
     return patch_path.split("://", 1)[-1]
 
 
+@dataclass(frozen=True)
+class EphemeralIndex:
+    """Ephemeral models and who inlines them.
+
+    Ephemeral nodes never reach `model_nodes` — they have no relation of their
+    own — so a branch touching only `models/intermediate/int_order_items.sql`
+    selected nothing locally and printed "No changed models to estimate", even
+    though that SQL is inlined into two downstream models and the cost change is
+    entirely real. The baseline path found it; the local path, which is what the
+    pre-commit hook runs, did not. Intermediate models are one of the most common
+    places a filter gets widened.
+    """
+
+    files: dict[str, str]  # ephemeral unique_id -> its project-relative file
+    dependents: dict[str, set[str]]  # unique_id -> the nodes that select from it
+
+
+def ephemeral_index(manifest: dict) -> EphemeralIndex:
+    nodes = manifest.get("nodes") or {}
+    files = {
+        uid: node.get("original_file_path") or ""
+        for uid, node in nodes.items()
+        if node.get("resource_type") == "model"
+        and (node.get("config") or {}).get("materialized") == "ephemeral"
+    }
+    dependents: dict[str, set[str]] = {}
+    for uid, node in nodes.items():
+        for dep in (node.get("depends_on") or {}).get("nodes") or []:
+            dependents.setdefault(dep, set()).add(uid)
+    return EphemeralIndex(files=files, dependents=dependents)
+
+
+def _inlining_models(
+    changed_paths: set[str], index: EphemeralIndex, nodes: dict[str, ModelNode]
+) -> set[str]:
+    """Priced models that inline a changed ephemeral, following chains of them.
+
+    Walks down rather than up, and stops at the first priced model: that is where
+    the ephemeral's SQL ends up, and where the cost shows.
+    """
+    stack = [uid for uid, path in index.files.items() if path and path in changed_paths]
+    seen: set[str] = set()
+    out: set[str] = set()
+    while stack:
+        uid = stack.pop()
+        if uid in seen:
+            continue
+        seen.add(uid)
+        for child in index.dependents.get(uid, ()):
+            if child in nodes:
+                out.add(child)
+            elif child in index.files:
+                stack.append(child)
+    return out
+
+
 def select_by_paths(
     nodes: dict[str, ModelNode],
     paths: list[str],
     macros: MacroIndex | None = None,
-) -> list[str]:
+    ephemeral: EphemeralIndex | None = None,
+) -> tuple[list[str], dict[str, str]]:
     """Models a set of changed project-relative paths touches: the model's own file,
-    the YAML that patches it, or any macro in its macro closure. Needs no baseline
-    manifest, so it drives the zero-setup local run."""
+    the YAML that patches it, any macro in its macro closure, or an ephemeral model
+    whose SQL it inlines. Needs no baseline manifest, so it drives the zero-setup
+    local run.
+
+    Returns the selection and, for anything selected for a reason other than its
+    own file changing, a note saying why — so a model never appears in a report
+    without an explanation.
+    """
     changed = set(paths)
     changed_macros = _changed_macros(changed, macros) if macros else set()
+    via_ephemeral = _inlining_models(changed, ephemeral, nodes) if ephemeral else set()
     selected = []
+    notes: dict[str, str] = {}
     for uid, node in nodes.items():
         if node.original_file_path and node.original_file_path in changed:
             selected.append(uid)
@@ -272,7 +398,13 @@ def select_by_paths(
             selected.append(uid)
         elif changed_macros.intersection(node.depends_on_macros):
             selected.append(uid)
-    return selected
+        elif uid in via_ephemeral:
+            selected.append(uid)
+            notes[uid] = (
+                "selected because an ephemeral model it inlines changed — the model's own "
+                "file is untouched"
+            )
+    return selected, notes
 
 
 def touches_project_config(paths: list[str]) -> bool:
@@ -311,6 +443,16 @@ def detect_basis(node: ModelNode, sql: str | None) -> EstimateBasis | None:
 def sql_warnings(node: ModelNode, sql: str | None) -> list[str]:
     """Non-fatal caveats about how trustworthy a dry-run of this SQL will be."""
     warnings: list[str] = []
+    if node.materialized == "materialized_view":
+        # A materialized view is priced exactly like a plain view, and the number
+        # that comes out describes building it once. BigQuery refreshes it on its
+        # own schedule and bills each refresh, so the recurring cost — the figure
+        # a reader of this row actually wants — is some multiple of what is shown,
+        # and dbt-costgate cannot see the schedule to say which.
+        warnings.append(
+            "materialized view — this is the cost of building it once; BigQuery bills each "
+            "automatic refresh separately, so the recurring cost is higher"
+        )
     if not sql:
         return warnings
     if _DYNAMIC_FILTER.search(sql) or _SUBQUERY_IN_PREDICATE.search(sql):

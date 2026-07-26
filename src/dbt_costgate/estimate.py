@@ -37,14 +37,18 @@ def estimate_models(
     diff_mode: bool,
     threads: int = 8,
     renames: dict[str, str] | None = None,
-    indirect: set[str] | None = None,
+    notes: dict[str, str] | None = None,
 ) -> list[ModelEstimate]:
+    """`notes` explains, per unique_id, why a model was selected when its own file
+    was not the thing that changed — an upstream macro, a config change, an
+    ephemeral model it inlines. One mechanism rather than one flag per cause, so
+    a model never lands in a report without an explanation beside it."""
     renames = renames or {}
-    indirect = indirect or set()
+    notes = notes or {}
 
     def work(uid: str) -> ModelEstimate:
         return _estimate_one(
-            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames, indirect
+            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames, notes
         )
 
     if threads <= 1 or len(selected) <= 1:
@@ -64,9 +68,12 @@ def _estimate_one(
     current_dir: Path | None,
     diff_mode: bool,
     renames: dict[str, str],
-    indirect: set[str],
+    notes: dict[str, str],
 ) -> ModelEstimate:
-    node = current_nodes[uid]
+    node = current_nodes.get(uid)
+    if node is None:
+        return _estimate_deleted(baseline_nodes[uid], runner)
+
     base = baseline_nodes.get(uid)
     renamed_base = None
     if base is None:
@@ -80,10 +87,8 @@ def _estimate_one(
     est.warnings = artifacts.sql_warnings(node, current_sql)
     if renamed_base is not None:
         est.warnings.append(f"compared against renamed baseline `{renamed_base.name}`")
-    if uid in indirect:
-        est.warnings.append(
-            "compiled SQL changed but the model file didn't — an upstream macro or a config change"
-        )
+    if uid in notes:
+        est.warnings.append(notes[uid])
 
     if not current_sql:
         est.error_kind = None
@@ -133,6 +138,35 @@ def _estimate_one(
     return est
 
 
+def _estimate_deleted(base: ModelNode, runner: DryRunner) -> ModelEstimate:
+    """A model in the baseline and gone from the branch.
+
+    Its current scan is zero because it no longer runs, so the delta is the whole
+    of what it used to cost — which is the point: removing a model is the most
+    direct cost reduction a change can make, and it used to be invisible.
+
+    Never gated. A deletion cannot increase anything, so no threshold applies to
+    it, and it must not become a "could not check" failure when its baseline
+    happens not to dry-run either.
+    """
+    est = ModelEstimate(node=base, is_deleted=True, skip_reason=SkipReason.DELETED)
+    est.bytes_current = 0
+    est.basis_current = est.basis_baseline = artifacts.detect_basis(base, base.compiled_code)
+    if not base.compiled_code:
+        est.warnings.append("deleted — the baseline has no compiled SQL, so the saving is unpriced")
+        return est
+    res = runner.dry_run(base.compiled_code, base.relation_name)
+    if res.ok:
+        est.bytes_baseline = res.total_bytes
+        if res.location:
+            est.node.location = res.location
+    else:
+        est.warnings.append(
+            "deleted — its baseline could not be dry-run, so the saving is unpriced"
+        )
+    return est
+
+
 def build_deltas(
     estimates: list[ModelEstimate], table: PricingTable, config: Config
 ) -> list[CostDelta]:
@@ -173,6 +207,7 @@ def build_deltas(
                 unique_id=est.node.unique_id,
                 is_incremental=est.is_incremental,
                 is_new=est.is_new,
+                is_deleted=est.is_deleted,
                 basis=est.basis_current,
                 gateable=skip_reason is None,
                 skip_reason=skip_reason,

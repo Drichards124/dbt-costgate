@@ -269,11 +269,6 @@ def test_selecting_a_model_that_does_not_exist_is_an_error(tmp_path: Path):
     assert code == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F18: select_changed iterates the current manifest only, so a deleted "
-    "model produces no row and no credit in the net line",
-)
 def test_deleting_a_model_is_reported_as_a_saving(tmp_path: Path, capsys):
     target = write_target(tmp_path, make_manifest(make_node("kept", compiled_code="KEPT")))
     baseline = _baseline(
