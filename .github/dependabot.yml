@@ -27,3 +27,14 @@ updates:
     schedule:
       interval: "weekly"
     labels: ["dependencies", "ci"]
+    ignore:
+      # The image must run a Python the CI matrix covers, which
+      # tests/test_container_image.py enforces. A bump past the matrix therefore
+      # fails by design, and reopening that pull request weekly is noise.
+      #
+      # This floor is not a decision about 3.14 — it is a restatement of where
+      # the matrix currently ends, and the same test asserts the two agree. Add a
+      # version to ci.yml and the suite tells you to raise this line, so the rule
+      # cannot quietly outlive its reason.
+      - dependency-name: "python"
+        versions: [">=3.14"]
