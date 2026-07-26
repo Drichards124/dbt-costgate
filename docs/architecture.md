@@ -76,11 +76,13 @@ Compute only, by scope: BigQuery meters compute and storage separately, and a
 dry-run reports bytes a query would scan — a compute figure carrying no storage
 information. Storage is a non-goal, not an unimplemented feature.
 
-Free tier (1 TiB/month, per billing account) is disclosed in the report footer,
-never deducted: its consumption is account-wide and invisible from a dry-run, so
-subtracting it would mean guessing, and guessing low is the wrong direction for a
-gate. Editions/slot pricing: bytes is a documented proxy, not an invoice
-prediction.
+Free tier (1 TiB/month, per billing account) is declared, never deducted:
+`pricing.free_tib_per_month` lets a team state their allowance and the report
+shows this change's projected monthly scan against it, but nothing is subtracted
+from any figure the gate reads. Consumption is account-wide and invisible from a
+dry-run, so subtracting would mean guessing, and guessing low is the wrong
+direction for a gate (ADR-0015). Editions/slot pricing: bytes is a documented
+proxy, not an invoice prediction.
 
 ## Known hard edges (design drivers)
 

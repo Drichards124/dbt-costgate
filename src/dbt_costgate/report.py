@@ -21,6 +21,7 @@ from dbt_costgate.layout import (
 )
 from dbt_costgate.models import (
     BASIS_LABELS,
+    TIB,
     CostDelta,
     PricingDisclosure,
     Report,
@@ -52,6 +53,28 @@ _FREE_TIER_NOTE = (
     "Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free "
     "tier is per billing account, so it is disclosed here and never deducted."
 )
+
+
+def _free_tier_note(d: PricingDisclosure) -> str:
+    """The footer sentence, with or without a declared allowance.
+
+    Declaring one changes what the report *says*, never what it subtracts, so the
+    sentence has to keep saying that in the same breath as the figure — a reader
+    who has configured an allowance is exactly the reader who might assume it was
+    applied.
+    """
+    if d.free_tib_per_month is None:
+        return _FREE_TIER_NOTE
+    return (
+        f"Priced from the first byte scanned. You declared {_tib(d.free_tib_per_month)}/month "
+        f"free; the allowance is per billing account, so it is shown against the total above "
+        f"and never subtracted from any figure the gate reads."
+    )
+
+
+def _tib(value: float) -> str:
+    """A TiB allowance, trailing zeros trimmed: `1 TiB`, `2.5 TiB`."""
+    return f"{value:,.2f}".rstrip("0").rstrip(".") + " TiB"
 
 
 def humanize_bytes(n: int | None) -> str:
@@ -120,7 +143,7 @@ def _footer_notes(d: PricingDisclosure) -> list[str]:
     """
     notes = [_disclosure_line(d)]
     if d.priced:
-        notes.append(_FREE_TIER_NOTE)
+        notes.append(_free_tier_note(d))
     notes.append(_DRYRUN_NOTE)
     return notes
 
@@ -226,6 +249,38 @@ def _net_line(report: Report) -> str | None:
         else ""
     )
     return f"{label}: {figures}{caveat}"
+
+
+def _allowance_line(report: Report) -> str | None:
+    """Where this change's monthly scan sits against the allowance the user
+    declared, or None when there is nothing to say.
+
+    The assumption travels with the number it is about, rather than living in a
+    config file nobody re-reads. Nothing here is subtracted from anything.
+
+    "for these models" is load-bearing. A pull request touches two models of two
+    hundred, so this total is not the project's monthly scan and must not be read
+    as one — the allowance is account-wide and this figure is not.
+
+    Silent when: no allowance declared (the default, so nothing changes for
+    anyone who has not opted in); the run is unpriced, since the tier is an
+    on-demand allowance that does not exist under capacity/Editions; or no
+    monthly figure could be computed, which `notices.py` explains instead.
+    """
+    d = report.disclosure
+    if d.free_tib_per_month is None or not d.priced:
+        return None
+    scanned = report.monthly_scan_bytes
+    if scanned is None:
+        return None
+    allowance = _tib(d.free_tib_per_month)
+    inside = scanned <= d.free_tib_per_month * TIB
+    verb = (
+        f"inside the {allowance}/month you declared free, if nothing else has drawn on it"
+        if inside
+        else f"past the {allowance}/month you declared free"
+    )
+    return f"Monthly scan for these models: {humanize_bytes(scanned)} — {verb}"
 
 
 # --- terminal ---------------------------------------------------------------
@@ -408,6 +463,12 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
         tail = " · bytes only (no per-byte price configured)"
     elif rate is not None:
         tail = f" · on-demand {_rate(d0.currency, rate)} · {d0.source}"
+        if d0.free_tib_per_month is not None:
+            # In the pricing line, where a reader already looks to find out what
+            # they are being charged — not buried in the footer. Same dim, same
+            # `·` rhythm, so it reads as one more fact about the rate rather than
+            # as an announcement.
+            tail += f" · first {_tib(d0.free_tib_per_month)}/month free"
     # Wrapped like everything else: at 60 columns the region, the rate and the
     # rate's provenance do not fit on one line, and a header that overflows is
     # the same defect this rewrite exists to remove.
@@ -445,9 +506,17 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
             )
 
     net = _net_line(report)
-    if net:
+    allowance = _allowance_line(report)
+    if net or allowance:
         lines.append("")
+    if net:
         lines.append(p.bold(" " * _INDENT + net))
+    if allowance:
+        # Dim, and under the net figure rather than beside it: it is context for
+        # that number, not another measurement competing with it.
+        lines.extend(
+            p.dim(line) for line in wrap(allowance, width, indent=_INDENT, hanging=_INDENT + 2)
+        )
 
     lines.append("")
     v = report.verdict
@@ -564,10 +633,16 @@ def render_markdown(report: Report) -> str:
         out.extend(f"> ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
-    if net:
+    allowance = _allowance_line(report)
+    if net or allowance:
         out.append("")
+    if net:
         label, _, rest = net.partition(": ")
         out.append(f"**{label}:** {rest}")
+    if allowance:
+        # `<sub>` rather than bold: same placement as the terminal, same job —
+        # context under the figure, quieter than the figure.
+        out.append(f"<sub>{allowance}</sub>")
 
     out.append("")
     v = report.verdict
@@ -631,17 +706,24 @@ def render_json(report: Report) -> str:
             # contract, and renaming them would break every existing consumer.
             "currency": d0.currency,
             "priced": d0.priced,
+            # What the user declared free, in TiB/month, or null. Reported, never
+            # applied: no other figure in this payload is adjusted by it.
+            "free_tib_per_month": d0.free_tib_per_month,
         },
         # Advisory notes about the configuration. Never affects `verdict`. `id` is
         # the stable key — it is what `notices.silence` accepts, so a consumer can
         # match on it without parsing prose.
         "notices": [{"id": n.id, "message": n.message} for n in report.notices],
-        # Signed: negative is a saving. Only meaningful in diff mode, which is why
-        # every field is null in absolute mode — there is no baseline to net against.
+        # Run-level figures. The three signed ones are deltas — negative is a
+        # saving — and are null in absolute mode, where there is no baseline to
+        # net against. The rest are absolute and survive it: the two counts, and
+        # `monthly_scan_bytes`, which is what these models are projected to scan
+        # in a month (null unless every estimated model has a run frequency).
         "net": {
             "bytes": delta(report.net_bytes),
             "usd_per_run": delta(report.net_usd_per_run),
             "usd_per_month": delta(report.net_usd_per_month),
+            "monthly_scan_bytes": report.monthly_scan_bytes,
             "models_estimated": len(report.estimated),
             "models_total": len(report.deltas),
         },

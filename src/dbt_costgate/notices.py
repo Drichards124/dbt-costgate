@@ -16,7 +16,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 from dbt_costgate import policy
-from dbt_costgate.models import CostDelta, Notice, PricingDisclosure
+from dbt_costgate.models import (
+    CostDelta,
+    Notice,
+    PricingDisclosure,
+    estimated,
+    monthly_scan_bytes,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from dbt_costgate.config import Config
@@ -44,7 +50,41 @@ _CHECKS: tuple[tuple[str, Check], ...] = (
         "new-models-not-percentage-gated",
         lambda config, table, disclosure, deltas: _new_models_ungated(config, deltas),
     ),
+    (
+        "free-tier-needs-run-frequency",
+        lambda config, table, disclosure, deltas: _free_tier_uncomputable(config, deltas),
+    ),
 )
+
+
+def _free_tier_uncomputable(config: Config, deltas: list[CostDelta]) -> str | None:
+    """A declared free-tier allowance with no monthly figure to compare it to.
+
+    `pricing.free_tib_per_month` is a statement about a *month*, so it needs a
+    monthly scan total — which needs a run frequency for every model. Without
+    one the key is set, appears in the header, and then silently does the rest of
+    nothing: the same shape as a dollar threshold under slot pricing, which is
+    what this module exists for.
+
+    Keyed on the computed result rather than on `run_frequency` being absent,
+    because a default that leaves one model uncovered fails in exactly the same
+    way and would otherwise slip through.
+
+    Silent when nothing was estimated. That produces the same `None`, but the fix
+    is not a run frequency, and a run with nothing to report does not need
+    another line telling it so.
+    """
+    if config.free_tib_per_month is None:
+        return None
+    rows = estimated(deltas)
+    if not rows or monthly_scan_bytes(deltas) is not None:
+        return None
+    return (
+        "pricing.free_tib_per_month is an allowance per month, and no monthly figure could be "
+        "worked out to compare it against, so the report can only name it. Set "
+        "run_frequency.default (or a run_frequency.models entry for every model in the change) "
+        "for how many times a month these models run."
+    )
 
 
 def _new_models_ungated(config: Config, deltas: list[CostDelta]) -> str | None:

@@ -197,3 +197,33 @@ def test_a_list_exclude_is_honoured(tmp_path: Path, capsys):
 def test_an_unknown_notice_id_is_rejected(tmp_path: Path):
     config = "notices:\n  silence:\n    - dead-money-threshold\n"
     assert _run(tmp_path, config) == EXIT_OPERATIONAL
+
+
+def test_a_negative_free_tier_allowance_is_refused(tmp_path: Path, capsys):
+    """An allowance is something you have, not something you owe. A negative one
+    would add to the very figure it is meant to relieve, and — because the
+    allowance is only ever reported — it would do so silently."""
+    code = _run(
+        tmp_path,
+        "pricing:\n  free_tib_per_month: -1\n",
+        runner=FakeDryRunner({"CUR": TIB, "BASE": TIB, "OTHER": TIB, "OTHER_BASE": TIB}),
+    )
+    err = capsys.readouterr().err
+    assert code == EXIT_OPERATIONAL
+    assert "pricing.free_tib_per_month" in err
+    assert "must be >= 0" in err
+
+
+def test_a_zero_free_tier_allowance_is_a_declaration_not_an_absence(tmp_path: Path, capsys):
+    """`0` says "I have an allowance and none of it is available", which is a
+    different statement from leaving the key out — and the report says so, since
+    a zero allowance means every byte is past it."""
+    code = _run(
+        tmp_path,
+        "pricing:\n  free_tib_per_month: 0\nrun_frequency:\n  default: 30\n",
+        runner=FakeDryRunner({"CUR": TIB, "BASE": TIB, "OTHER": TIB, "OTHER_BASE": TIB}),
+    )
+    out = " ".join(capsys.readouterr().out.split())
+    assert code == 0
+    assert "first 0 TiB/month free" in out
+    assert "past the 0 TiB/month you declared free" in out

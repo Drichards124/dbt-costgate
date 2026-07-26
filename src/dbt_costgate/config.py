@@ -68,6 +68,7 @@ class Config:
     usd_per_tib: float | None = None
     pricing_regions: dict[str, float] = field(default_factory=dict)
     currency: str | None = None
+    free_tib_per_month: float | None = None
     thresholds: Thresholds = field(default_factory=Thresholds)
     run_frequency_default: int | None = None
     run_frequency_models: dict[str, int] = field(default_factory=dict)
@@ -130,6 +131,7 @@ class Config:
             usd_per_tib=_opt_float(pricing.get("usd_per_tib"), "pricing.usd_per_tib"),
             pricing_regions=_region_rates(pricing.get("regions")),
             currency=_opt_currency(pricing.get("currency")),
+            free_tib_per_month=_free_tib(pricing.get("free_tib_per_month")),
             thresholds=Thresholds(
                 **{
                     name: _opt_float(thr.get(name), f"thresholds.{name}")
@@ -284,6 +286,18 @@ def _region_rates(raw) -> dict[str, float]:
     return rates
 
 
+def _free_tib(raw) -> float | None:
+    """Parse `pricing.free_tib_per_month`. 0 is legal and means "declared, and
+    none of it available", which is a different statement from leaving the key
+    out; a negative allowance is nonsense and would add to the figure it is meant
+    to relieve."""
+    key = "pricing.free_tib_per_month"
+    value = _opt_float(raw, key)
+    if value is not None and value < 0:
+        raise ConfigError(f"{key}: allowance must be >= 0, got {value}")
+    return value
+
+
 def _baseline_targets(raw) -> dict[str, BaselineTarget]:
     """Parse a `baselines:` map (name -> {manifest|against}). Non-dict entries
     become empty targets; the cli reports the one-of violation when selected."""
@@ -378,6 +392,21 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "table. Keys match case-insensitively; 0 is allowed. Unlisted regions "
         "use the table.",
         example="europe-west3: 4.80\nUS: 6.00",
+    ),
+    ConfigField(
+        "pricing.free_tib_per_month",
+        "free_tib_per_month",
+        "float",
+        None,
+        "TiB/month you treat as free, e.g. 1 for BigQuery's on-demand tier. "
+        "Reported, never deducted: the report shows this change's projected "
+        "monthly scan against the allowance, and no cost figure, threshold or "
+        "verdict changes. The allowance belongs to the whole billing account and "
+        "is drawn down by every other query on it, which dbt-costgate cannot "
+        "see, so subtracting it would be a guess a gate should not make. Needs "
+        "run_frequency to have a monthly figure to compare. Default: unset, "
+        "which reports the tier without a figure.",
+        example="1",
     ),
     ConfigField(
         "thresholds.max_usd_increase_per_run",

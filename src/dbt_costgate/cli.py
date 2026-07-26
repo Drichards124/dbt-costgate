@@ -209,7 +209,7 @@ def _log_error_details(estimates) -> None:
             )
 
 
-def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
+def _build_disclosure(table: PricingTable, deltas, config: Config) -> PricingDisclosure:
     regions: dict[str, float] = {}
     region_sources: dict[str, str] = {}
     seen = deltas or []
@@ -225,6 +225,7 @@ def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
         last_verified=table.last_verified,
         region_sources=region_sources,
         currency=table.currency,
+        free_tib_per_month=config.free_tib_per_month,
     )
 
 
@@ -516,7 +517,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         currency=args.currency or config.currency,
     )
     deltas = estimate.build_deltas(estimates, table, config)
-    disclosure = _build_disclosure(table, deltas)
+    disclosure = _build_disclosure(table, deltas, config)
 
     try:
         _validate_resolved_config(table, config, disclosure)

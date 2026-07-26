@@ -379,6 +379,59 @@ class CostDelta:
         return (self.bytes_current - self.bytes_baseline) / self.bytes_baseline * 100.0
 
 
+def estimated(deltas: list[CostDelta]) -> list[CostDelta]:
+    """Models with a usable before/after. Bytes, not dollars, decide this — an
+    unpriced run has real byte deltas and zero-valued money ones.
+
+    A basis mismatch is excluded, and it is the one exclusion that is not about
+    policy. `exclude` and `warn_only` say a model must not *fail the gate*; the
+    model still spends money, so it belongs in the total. A basis mismatch says
+    the two numbers cannot be subtracted at all — and having printed exactly that
+    warning, the report went on to headline `Net saving: USD 4.31/run`, a single
+    incremental run taken off a full rebuild.
+
+    Read off `comparable`, not `skip_reason`, because `exclude:` overwrites the
+    reason — so asking the reason let a user who silenced the gate for one model
+    put that model's incomparable figure back in the total.
+
+    A function over deltas rather than only a `Report` property, because
+    `notices.collect` runs before a `Report` exists.
+    """
+    return [d for d in deltas if d.bytes_delta is not None and d.comparable]
+
+
+def monthly_scan_bytes(deltas: list[CostDelta]) -> int | None:
+    """What these models are projected to scan in a month, or None when that
+    cannot be said.
+
+    The one absolute run-level figure in the codebase: every other total here is
+    a delta. It exists so a team that has declared a free-tier allowance
+    (`pricing.free_tib_per_month`) can be told where this change sits relative to
+    it. Nothing subtracts it — see `PricingDisclosure.free_tib_per_month`.
+
+    None rather than a partial sum when any row is missing a piece, following
+    `net_usd_per_month`: a total that quietly omits some of its rows reads as
+    complete and understates, which is the one direction this tool does not go.
+    In practice the missing piece is `runs_per_month`, i.e. no `run_frequency` in
+    the config, and a notice says so. The `bytes_current` guard is defensive
+    rather than live — `estimated` already drops those rows, since `bytes_delta`
+    is None exactly when `bytes_current` is — but it keeps this correct on its
+    own terms instead of by depending on a filter defined elsewhere.
+
+    None on empty input, matching `net_bytes`. Zero would claim this change
+    scans nothing in a month; None says there is nothing to tell you.
+    """
+    rows = estimated(deltas)
+    if not rows:
+        return None
+    total = 0
+    for d in rows:
+        if d.bytes_current is None or not d.runs_per_month:
+            return None
+        total += d.bytes_current * d.runs_per_month
+    return total
+
+
 class Status(str, Enum):
     PASS = "pass"  # noqa: S105 — a gate verdict, not a credential
     WARN = "warn"
@@ -403,6 +456,17 @@ class PricingDisclosure:
     last_verified: str
     region_sources: dict[str, str] = field(default_factory=dict)  # region -> rate source
     currency: str = "USD"  # ISO 4217 code the applied rates are denominated in
+    # TiB/month the user has declared free, from `pricing.free_tib_per_month`.
+    # None means undeclared, which is the default and prints exactly what it
+    # always did. It rides on the disclosure because it is provenance about the
+    # price rather than a measurement, and because both renderers already read
+    # the disclosure for the header and the footer.
+    #
+    # Declared, never deducted: BigQuery's allowance belongs to the whole billing
+    # account and is drawn down by every query anyone runs, which a dry-run
+    # cannot see. So this changes what a report *says* and never what the gate
+    # reads — see ADR-0015.
+    free_tib_per_month: float | None = None
 
     @property
     def priced(self) -> bool:
@@ -438,21 +502,8 @@ class Report:
 
     @property
     def estimated(self) -> list[CostDelta]:
-        """Models with a usable before/after. Bytes, not dollars, decide this —
-        an unpriced run has real byte deltas and zero-valued money ones.
-
-        A basis mismatch is excluded, and it is the one exclusion that is not
-        about policy. `exclude` and `warn_only` say a model must not *fail the
-        gate*; the model still spends money, so it belongs in the total. A basis
-        mismatch says the two numbers cannot be subtracted at all — and having
-        printed exactly that warning, the report went on to headline `Net saving:
-        USD 4.31/run`, a single incremental run taken off a full rebuild.
-
-        Read off `comparable`, not `skip_reason`, because `exclude:` overwrites
-        the reason — so asking the reason let a user who silenced the gate for
-        one model put that model's incomparable figure back in the total.
-        """
-        return [d for d in self.deltas if d.bytes_delta is not None and d.comparable]
+        """Models with a usable before/after — see the module-level `estimated`."""
+        return estimated(self.deltas)
 
     @property
     def net_bytes(self) -> int | None:
@@ -473,6 +524,12 @@ class Report:
         if not values or any(v is None for v in values):
             return None
         return sum(values)
+
+    @property
+    def monthly_scan_bytes(self) -> int | None:
+        """What these models are projected to scan in a month — see the
+        module-level `monthly_scan_bytes`."""
+        return monthly_scan_bytes(self.deltas)
 
     @property
     def unestimated_count(self) -> int:
