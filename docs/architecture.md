@@ -100,8 +100,10 @@ Shipped: absolute cost ceilings (`max_usd_total` / `--max-usd-total`,
 `max_tib_total` / `--max-tib-total`) — gate a model's *total* per-run scan, not
 just the before/after delta. Unlike the three increase thresholds, an absolute
 ceiling needs no baseline, so it also gates the zero-setup local (`absolute`) mode.
-Caveat: for incremental models the reported `$/run` is the full-refresh scan, so an
-absolute cap gates rebuild cost — paired with the existing full-refresh labeling.
+Caveat: for incremental models what the reported `$/run` *is* depends on the
+estimate basis, so an absolute cap gates rebuild cost only on a `full-refresh`
+row — paired with the per-row basis labeling, which is derived from the basis
+rather than from `is_incremental` so the tag and the figure cannot disagree.
 
 Shipped: one-command local diff (`--against <ref>`) — checks the ref out into an
 isolated git worktree, `dbt compile`s it as the baseline, and removes the worktree

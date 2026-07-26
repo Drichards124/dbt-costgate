@@ -5,14 +5,18 @@ import pytest
 
 from dbt_costgate import report
 from dbt_costgate.models import (
-    INCREMENTAL_BASIS_WARNING,
+    BASIS_LABELS,
     CostDelta,
+    EstimateBasis,
     Notice,
     PricingDisclosure,
     Report,
     Status,
     Verdict,
 )
+
+_FULL_REFRESH = BASIS_LABELS[EstimateBasis.FULL_REFRESH]
+_INCREMENTAL_FORM = BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM]
 
 
 def _report(mode="diff", status=Status.FAIL):
@@ -21,6 +25,7 @@ def _report(mode="diff", status=Status.FAIL):
             name="fct_orders_daily",
             unique_id="model.pkg.fct_orders_daily",
             is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
             is_new=False,
             gateable=True,
             bytes_baseline=71_000_000,
@@ -28,13 +33,14 @@ def _report(mode="diff", status=Status.FAIL):
             usd_baseline=0.0004,
             usd_current=18.19,
             region="US",
-            warnings=[INCREMENTAL_BASIS_WARNING],
+            warnings=[BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning],
             runs_per_month=30,
         ),
         CostDelta(
             name="inc_missing",
             unique_id="model.pkg.inc_missing",
             is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
             is_new=False,
             gateable=False,
             bytes_baseline=None,
@@ -411,7 +417,7 @@ def test_absent_notices_add_nothing():
     # text: a reworded footnote fails here loudly instead of quietly leaving an
     # assertion that matches nothing.
     warned = [line for line in report.render_terminal(rep).splitlines() if "⚠" in line]
-    assert warned == [f"  ⚠ {report._INCREMENTAL_FOOTNOTE}"]
+    assert warned == [f"  ⚠ {_FULL_REFRESH.footnote}"]
     assert json.loads(report.render_json(rep))["notices"] == []
 
 
@@ -490,6 +496,7 @@ def _incrementals(n: int) -> Report:
             name=f"fct_{i}",
             unique_id=f"model.pkg.fct_{i}",
             is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
             is_new=False,
             gateable=True,
             bytes_baseline=1_000_000,
@@ -497,7 +504,7 @@ def _incrementals(n: int) -> Report:
             usd_baseline=0.01,
             usd_current=0.02,
             region="US",
-            warnings=[INCREMENTAL_BASIS_WARNING],
+            warnings=[BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning],
         )
         for i in range(n)
     ]
@@ -526,8 +533,8 @@ def test_the_incremental_warning_is_said_once_however_many_rows_carry_it():
     """
     for render in (report.render_terminal, report.render_markdown):
         out = render(_incrementals(4))
-        assert out.count(report._INCREMENTAL_FOOTNOTE) == 1
-        assert INCREMENTAL_BASIS_WARNING not in out
+        assert out.count(_FULL_REFRESH.footnote) == 1
+        assert _FULL_REFRESH.warning not in out
 
 
 def test_every_incremental_row_keeps_its_own_tag():
@@ -555,7 +562,7 @@ def test_no_footnote_when_no_row_carries_the_warning():
     rep = _incrementals(1)
     rep.deltas[0].warnings = []
     for render in (report.render_terminal, report.render_markdown):
-        assert report._INCREMENTAL_FOOTNOTE not in render(rep)
+        assert _FULL_REFRESH.footnote not in render(rep)
 
 
 def test_the_footnote_follows_the_warning_and_not_the_tag():
@@ -569,4 +576,98 @@ def test_the_footnote_follows_the_warning_and_not_the_tag():
     assert rep.deltas[0].is_incremental
     terminal = report.render_terminal(rep)
     assert "(full-refresh)" in terminal
-    assert report._INCREMENTAL_FOOTNOTE not in terminal
+    assert _FULL_REFRESH.footnote not in terminal
+
+
+def _basis_row(name: str, basis: EstimateBasis) -> CostDelta:
+    return CostDelta(
+        name=name,
+        unique_id=f"model.pkg.{name}",
+        is_incremental=True,
+        basis=basis,
+        is_new=False,
+        gateable=True,
+        bytes_baseline=1_000_000,
+        bytes_current=2_000_000,
+        usd_baseline=0.01,
+        usd_current=0.02,
+        region="US",
+        warnings=[BASIS_LABELS[basis].warning],
+    )
+
+
+def _basis_report(*bases: EstimateBasis) -> Report:
+    return Report(
+        deltas=[_basis_row(f"m{i}", b) for i, b in enumerate(bases)],
+        disclosure=PricingDisclosure(
+            regions={"US": 6.25},
+            source="built-in table",
+            table_version="2026.07",
+            last_verified="2026-07-23",
+        ),
+        verdict=Verdict(status=Status.PASS, breaches=[], exit_code=0),
+        mode="diff",
+    )
+
+
+def test_an_incremental_form_row_is_not_labelled_a_rebuild():
+    """The defect this exists to prevent. The model is incremental either way, so
+    a tag derived from `is_incremental` called both rows `full-refresh` — telling
+    a reader the figure was a rebuild when the dry-run measured a single run
+    against the table as already built. On a large fact table those differ by
+    orders of magnitude, and the wrong one reads low."""
+    rep = _basis_report(EstimateBasis.INCREMENTAL_FORM)
+    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+        assert _INCREMENTAL_FORM.tag in out
+        assert _FULL_REFRESH.tag not in out
+        assert _FULL_REFRESH.footnote not in out
+
+
+def test_the_tag_follows_the_basis_and_not_is_incremental():
+    """Stated directly, because the two agree on every row except the one that
+    matters. `is_incremental` is a fact about the model; the basis is a fact about
+    the number printed beside it, and only the second can label that number."""
+    rep = _basis_report(EstimateBasis.INCREMENTAL_FORM)
+    assert rep.deltas[0].is_incremental
+    assert report._row_tag(rep.deltas[0]) == _INCREMENTAL_FORM.tag
+
+
+def test_a_row_with_an_unknown_basis_is_left_unlabelled():
+    """No basis means nothing was established about the shape that was measured.
+    Falling back to a tag would be a guess printed as a fact; an absent tag is
+    merely silent."""
+    rep = _basis_report(EstimateBasis.FULL_REFRESH)
+    # Both come from the same `detect_basis` call in the pipeline, so an unknown
+    # basis means an unknown basis warning too. Clearing one and not the other
+    # would build a state the estimator cannot produce.
+    rep.deltas[0].basis = None
+    rep.deltas[0].warnings = []
+    assert report._row_tag(rep.deltas[0]) is None
+    assert _FULL_REFRESH.tag not in report.render_terminal(rep)
+
+
+def test_a_report_mixing_bases_explains_both_tags():
+    """A change can touch one model compiled fresh and another compiled against
+    its table. Printing a single footnote would leave one of the two tags on the
+    page with nothing saying what it means — and the reader with no way to know
+    which figure they are looking at."""
+    rep = _basis_report(EstimateBasis.FULL_REFRESH, EstimateBasis.INCREMENTAL_FORM)
+    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+        assert out.count(_FULL_REFRESH.footnote) == 1
+        assert out.count(_INCREMENTAL_FORM.footnote) == 1
+        assert _FULL_REFRESH.tag in out and _INCREMENTAL_FORM.tag in out
+        # still collapsed: neither per-model warning survives beside its row
+        assert _FULL_REFRESH.warning not in out
+        assert _INCREMENTAL_FORM.warning not in out
+
+
+def test_json_states_which_basis_was_measured():
+    """`is_incremental` was already there and cannot answer this: it is true for
+    both shapes. A consumer gating on rebuild cost needs to know which figure it
+    received, so the basis is exposed rather than left to be inferred."""
+    payload = json.loads(report.render_json(_basis_report(EstimateBasis.INCREMENTAL_FORM)))
+    assert payload["models"][0]["basis"] == "incremental_form"
+    assert payload["models"][0]["is_incremental"] is True
+    unknown = _basis_report(EstimateBasis.FULL_REFRESH)
+    unknown.deltas[0].basis = None
+    assert json.loads(report.render_json(unknown))["models"][0]["basis"] is None

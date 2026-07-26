@@ -180,7 +180,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +52.75/month (4 runs)
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
 
-  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
 
   Net increase: USD 13.19/run · USD 52.82/month
 
@@ -200,11 +200,12 @@ worth a minute of thought rather than leaving everything on the default.
 
 Two things to get right:
 
-- **For an incremental, count full rebuilds, not runs.** The figure being
-  multiplied is the full-refresh scan (see
-  [the caveat below](#when-the-number-can-be-wrong)), so a model that runs nightly
-  but is only rebuilt weekly is `4`, not `30`. Using `30` there overstates its
-  monthly cost by roughly 7×.
+- **For an incremental, match the frequency to the row's tag.** A `full-refresh`
+  row is multiplying a *rebuild*, so count rebuilds: a model that runs nightly
+  but is only rebuilt weekly is `4`, not `30`, and using `30` overstates its
+  monthly cost by roughly 7×. An `incremental` row is multiplying one run, so
+  count runs. See [the caveat below](#when-the-number-can-be-wrong) for which
+  you have and why.
 - **Setting nothing is a valid choice.** With no frequency at all, no monthly
   figure is shown — an absent number rather than a wrong one — and `$/run` and the
   thresholds all still work.
@@ -378,29 +379,45 @@ Stated up front, because a cost tool that hides its error bars is worse than non
 Each one says what to do about it. Where there is a real fix, it is named; where
 there genuinely isn't one, it says so rather than inventing a workaround.
 
-**Incremental models are priced as a full refresh.** This is the caveat that
-surprises people most, so it's worth understanding rather than just noting.
+**An incremental model has two prices, and which one you get is decided by the
+compile.** This is the caveat that surprises people most, so it's worth
+understanding rather than just noting.
 
 An incremental model compiles differently depending on whether its target table
-already exists. Compiled fresh, `is_incremental()` is false, so dbt emits the
-**full-refresh** query — no `{{ this }}` self-reference — which dry-runs cleanly.
-That is what dbt-costgate measures, and it labels every such row `full-refresh`.
+already exists. Compiled **fresh**, `is_incremental()` is false, so dbt emits the
+full-refresh query — no `{{ this }}` self-reference — and the figure is what it
+costs to **rebuild** that table. Compiled **against the existing table**, dbt
+emits the incremental query, and the figure is the cost of **one run** against
+the table as it already stands. Both dry-run cleanly. Neither is wrong; they
+answer different questions, and on a large fact table they differ by orders of
+magnitude.
 
-So the figure is **what it costs to rebuild that table**, not what your nightly
-incremental run costs. The true per-run cost depends on a predicate like
-`WHERE ts > (SELECT MAX(ts) ...)`, whose selectivity is unknowable before the
-query runs — BigQuery reports the worst case. dbt-costgate does not fake a number
-there; it tells you which basis it used.
+So the number alone does not tell you which you have — the row tag does.
+dbt-costgate labels each row from the basis it actually measured, `full-refresh`
+or `incremental`, and explains the tag in a footnote beneath the rows. It is
+derived from the compiled SQL rather than from "is this model incremental", so a
+row cannot be labelled a rebuild because of what the model *is* when the figure
+beside it measured something else.
 
-The diff is still the useful signal: comparing full-refresh to full-refresh is
-apples to apples, and it reliably catches the structural regressions that matter —
-a bad join, lost partition pruning, a widened scan.
+Either way the true per-run cost of a dynamic predicate like
+`WHERE ts > (SELECT MAX(ts) ...)` is unknowable before the query runs — BigQuery
+reports the worst case. dbt-costgate does not fake a number there; it tells you
+which basis it used.
 
-> **What to do:** nothing to configure — read the figure as rebuild cost. Two
-> knock-ons worth knowing: a `max_usd_total` / `max_tib_total` ceiling on an
-> incremental caps *rebuild* cost, and `run_frequency` for an incremental should
-> reflect how often it is **fully rebuilt**, not how often it runs, or the monthly
-> figure will be far too high.
+The diff is still the useful signal, **as long as both sides share a basis**:
+comparing full-refresh to full-refresh is apples to apples and reliably catches
+the structural regressions that matter — a bad join, lost partition pruning, a
+widened scan. Comparing across bases is refused outright rather than fudged; see
+the next caveat.
+
+> **What to do:** nothing to configure — read the tag, then read the figure as
+> what the tag says it is. Two knock-ons worth knowing: a `max_usd_total` /
+> `max_tib_total` ceiling gates whichever figure it was given, so it caps rebuild
+> cost on a `full-refresh` row and does not on an `incremental` one; and
+> `run_frequency` should match the same figure — how often the table is **fully
+> rebuilt** for a `full-refresh` row, how often the model **runs** for an
+> `incremental` one. Getting that pairing backwards is what makes a monthly
+> figure wrong by the same orders of magnitude.
 
 **Comparing two different query shapes is refused, not fudged.** Following from
 the above: if your baseline manifest came from a production run, its incrementals
