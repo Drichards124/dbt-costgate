@@ -51,4 +51,17 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# `S` is flake8-bandit. This project runs in CI next to warehouse credentials
+# (see SECURITY.md), so static security linting earns its keep. The rules that
+# actually matter stay on everywhere — S602 (shell=True) in particular is never
+# suppressed anywhere in this file, and a test asserts that it still fires.
+select = ["E", "F", "I", "UP", "B", "S"]
+
+# Suppressed only in the test tree, and only per-rule:
+#   S101 — `assert` is how pytest expresses every test.
+#   S603/S607 — helpers shell out to git and bash to build fixtures.
+#   S105/S608 — deliberate fake secrets and fake SQL, which is the point of the
+#               fixtures that carry them (see tests/test_error_redaction.py).
+# Source suppressions are per-line with a reason at the call site instead.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603", "S607", "S105", "S608"]

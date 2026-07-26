@@ -36,7 +36,15 @@ class AgainstError(Exception):
 
 
 def _git(project_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["git", *args], cwd=project_dir, capture_output=True, text=True)
+    # S603/S607: the argument list is built here and passed as a list, so there is
+    # no shell to inject into; `git` is looked up on PATH on purpose, because
+    # pinning an absolute path would break every non-standard install.
+    proc = subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+    )
     if check and proc.returncode != 0:
         raise AgainstError(proc.stderr.strip() or f"git {' '.join(args)} failed")
     return proc
@@ -60,7 +68,9 @@ def _resolve_dbt() -> str:
 def _dbt_compile(worktree_dir: Path) -> None:
     """Default compiler: run `dbt compile` in the worktree. Injectable so tests
     exercise the whole flow without dbt, a warehouse, or credentials."""
-    proc = subprocess.run(
+    # S603: a fixed two-element list, no shell. Note S607 does *not* fire here —
+    # _resolve_dbt returns an absolute path, which is the point of that helper.
+    proc = subprocess.run(  # noqa: S603
         [_resolve_dbt(), "compile"], cwd=worktree_dir, capture_output=True, text=True
     )
     if proc.returncode != 0:

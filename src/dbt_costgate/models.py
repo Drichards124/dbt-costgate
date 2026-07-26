@@ -253,7 +253,7 @@ class CostDelta:
 
 
 class Status(str, Enum):
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105 — a gate verdict, not a credential
     WARN = "warn"
     FAIL = "fail"
 
