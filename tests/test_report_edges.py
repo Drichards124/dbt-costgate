@@ -89,10 +89,17 @@ def test_an_unusual_model_name_survives_every_format(tmp_path: Path, capsys, nam
             responses={"CUR": 2 * TIB, "BASE": TIB},
         )
         out = capsys.readouterr().out
-        # JSON escapes non-ASCII by default, which is valid and decodes back;
-        # the other two formats must carry the name literally.
-        found = json.loads(out)["models"][0]["name"] if fmt == "json" else out
-        assert name in found
+        if fmt == "json":
+            # JSON escapes non-ASCII by default, which is valid and decodes back.
+            assert json.loads(out)["models"][0]["name"] == name
+        elif fmt == "markdown":
+            assert name in out
+        else:
+            # The terminal caps the model column, so a 120-character name is
+            # truncated on purpose — one outlier must not cost every other column
+            # its place. What has to survive is identification, and the full name
+            # is a `--format json` away.
+            assert name[:40] in out
 
 
 def test_a_zero_byte_model_is_priced_at_zero_not_dropped(tmp_path: Path, capsys):
@@ -171,11 +178,6 @@ def test_a_brand_new_model_can_breach_a_percentage_only_gate(tmp_path: Path):
     assert code == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F21: report.py:169 and policy.py:88 render percentages at 0dp, so a "
-    "sub-1% threshold produces the breach line '+0% exceeds 0%'",
-)
 def test_a_sub_one_percent_breach_says_which_numbers_it_compared(tmp_path: Path, capsys):
     _diff(
         tmp_path,

@@ -8,7 +8,17 @@ import json
 import sys
 from pathlib import Path
 
-from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, notices, policy, report
+from dbt_costgate import (
+    __version__,
+    against,
+    artifacts,
+    estimate,
+    gitdiff,
+    layout,
+    notices,
+    policy,
+    report,
+)
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
@@ -82,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--format", choices=["terminal", "markdown", "json"], help="Output format.")
     check.add_argument("--output", help="Write the report to this file instead of stdout.")
+    check.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Colour the terminal report (default: auto — on at a terminal, off when "
+        "piped or when NO_COLOR is set).",
+    )
     check.add_argument("--threads", type=int, default=8, help="Parallel dry-runs (default: 8).")
     check.add_argument("--project", help="BigQuery project for dry-run jobs (default: ADC).")
     check.add_argument("--region", help="Force a pricing region (default: auto-detect).")
@@ -425,8 +442,17 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         notices=notices.collect(config, table, disclosure),
     )
 
-    rendered = report.render(rep, config.report_format)
-    if args.output:
+    # A report going to a file is not going to this terminal: it is rendered at a
+    # fixed width with no escape sequences, so a committed or CI-captured report
+    # never depends on the window that produced it.
+    to_file = bool(args.output)
+    rendered = report.render(
+        rep,
+        config.report_format,
+        width=layout.DEFAULT_WIDTH if to_file else layout.terminal_width(sys.stdout),
+        color=not to_file and layout.should_color(args.color, sys.stdout),
+    )
+    if to_file:
         Path(args.output).write_text(rendered + "\n", "utf-8")
     else:
         print(rendered)

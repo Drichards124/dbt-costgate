@@ -8,7 +8,7 @@ or user-excluded models are reported but never cause a failure.
 from __future__ import annotations
 
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import TIB, CostDelta, Status, Verdict, format_money
+from dbt_costgate.models import TIB, CostDelta, Status, Verdict, format_money, format_pct
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -85,7 +85,10 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
             )
     if thr.max_pct_increase is not None and d.pct_delta is not None:
         if d.pct_delta > thr.max_pct_increase:
-            out.append(f"{d.name}: {d.pct_delta:+,.0f}% exceeds {thr.max_pct_increase:,.0f}%")
+            out.append(
+                f"{d.name}: {format_pct(d.pct_delta)} exceeds "
+                f"{format_pct(thr.max_pct_increase, signed=False)}"
+            )
     month_delta = d.usd_per_month_delta
     if thr.max_usd_increase_per_month is not None and month_delta is not None:
         if month_delta > thr.max_usd_increase_per_month:

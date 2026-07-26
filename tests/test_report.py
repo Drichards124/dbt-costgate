@@ -19,6 +19,15 @@ _FULL_REFRESH = BASIS_LABELS[EstimateBasis.FULL_REFRESH]
 _INCREMENTAL_FORM = BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM]
 
 
+def _flat(text: str) -> str:
+    """Terminal output with its line breaks collapsed.
+
+    The report wraps prose to the terminal width, so a sentence that is one string
+    in the source arrives split across lines. Assertions about *what* was said run
+    against this; assertions about layout run against the raw output."""
+    return " ".join(text.split())
+
+
 def _report(mode="diff", status=Status.FAIL):
     deltas = [
         CostDelta(
@@ -206,7 +215,10 @@ def test_amounts_carry_their_iso_code_not_a_symbol():
 def test_zero_rate_report_drops_money_and_shows_byte_growth():
     out = report.render_terminal(_unpriced_report())
     assert "bytes only (no per-byte price configured)" in out
-    assert "2.00 TiB → 9.00 TiB" in out
+    # Baseline and current are adjacent columns now, so the before/after reads
+    # across one row rather than through an arrow.
+    row = next(line for line in out.splitlines() if "fct_orders" in line)
+    assert "2.00 TiB" in row and "9.00 TiB" in row
     assert "+350%" in out
     assert "USD" not in out and "$" not in out  # no amount is claimed
     assert "rate is 0 for US" in out
@@ -396,7 +408,7 @@ def test_notices_render_in_every_format_and_sit_with_the_disclosure():
 
     term = report.render_terminal(rep)
     # The id leads the line: it is what a user types into `notices.silence`.
-    assert f"⚠ {_NOTICE.id}: {body}" in term
+    assert f"⚠ {_NOTICE.id} {body}" in _flat(term)
     # Placed with the provenance footer, not with the gate: both describe how the
     # run was configured rather than what the change did.
     assert term.index(body) > term.index("GATE:")
@@ -417,7 +429,8 @@ def test_absent_notices_add_nothing():
     # text: a reworded footnote fails here loudly instead of quietly leaving an
     # assertion that matches nothing.
     warned = [line for line in report.render_terminal(rep).splitlines() if "⚠" in line]
-    assert warned == [f"  ⚠ {_FULL_REFRESH.footnote}"]
+    assert len(warned) == 1
+    assert _FULL_REFRESH.footnote in _flat(report.render_terminal(rep))
     assert json.loads(report.render_json(rep))["notices"] == []
 
 
@@ -482,11 +495,12 @@ def test_both_renderers_carry_the_same_footer_notes():
     read. Compared as a whole list so an added note is covered without anyone
     remembering to extend this test."""
     for rep in (_report(), _unpriced_report()):
-        terminal = [
-            line.strip() for line in report.render_terminal(rep).split("\n") if line.strip()
-        ]
+        # The terminal footer is wrapped to the width, so it is compared as text
+        # rather than line by line — the notes have to be the same sentences in
+        # the same order, not the same line breaks.
+        terminal = _flat(report.render_terminal(rep))
         markdown = _md_footer(report.render_markdown(rep))
-        assert terminal[-len(markdown) :] == markdown
+        assert terminal.endswith(_flat(" ".join(markdown)))
 
 
 def _incrementals(n: int) -> Report:
@@ -532,7 +546,7 @@ def test_the_incremental_warning_is_said_once_however_many_rows_carry_it():
     not the per-row repeats came back beneath it.
     """
     for render in (report.render_terminal, report.render_markdown):
-        out = render(_incrementals(4))
+        out = _flat(render(_incrementals(4)))
         assert out.count(_FULL_REFRESH.footnote) == 1
         assert _FULL_REFRESH.warning not in out
 
@@ -543,8 +557,10 @@ def test_every_incremental_row_keeps_its_own_tag():
     collapsing the prose while also dropping the tag would leave the footnote
     referring to nothing."""
     rep = _incrementals(4)
-    terminal = report.render_terminal(rep)
-    assert terminal.count("(full-refresh)") == 4
+    # One per table row: the tag has its own column now, so it is counted on the
+    # rows rather than by a parenthetical that no longer exists.
+    tagged = [line for line in report.render_terminal(rep).splitlines() if "full-refresh" in line]
+    assert len([line for line in tagged if line.strip().startswith("fct_")]) == 4
     assert report.render_markdown(rep).count("_full-refresh_") == 4
 
 
@@ -554,7 +570,7 @@ def test_a_models_own_warnings_still_render_on_its_row():
     rep = _incrementals(2)
     rep.deltas[0].warnings.append("dynamic filter — dry-run may be worst-case (overestimate)")
     assert "  fct_0" in report.render_terminal(rep)
-    assert "      ⚠ dynamic filter" in report.render_terminal(rep)
+    assert "⚠ fct_0 dynamic filter" in _flat(report.render_terminal(rep))
     assert "> ⚠ **fct_0** — dynamic filter" in report.render_markdown(rep)
 
 
@@ -575,8 +591,8 @@ def test_the_footnote_follows_the_warning_and_not_the_tag():
     rep.deltas[0].warnings = []
     assert rep.deltas[0].is_incremental
     terminal = report.render_terminal(rep)
-    assert "(full-refresh)" in terminal
-    assert _FULL_REFRESH.footnote not in terminal
+    assert _FULL_REFRESH.tag in terminal
+    assert _FULL_REFRESH.footnote not in _flat(terminal)
 
 
 def _basis_row(name: str, basis: EstimateBasis) -> CostDelta:
@@ -652,7 +668,7 @@ def test_a_report_mixing_bases_explains_both_tags():
     page with nothing saying what it means — and the reader with no way to know
     which figure they are looking at."""
     rep = _basis_report(EstimateBasis.FULL_REFRESH, EstimateBasis.INCREMENTAL_FORM)
-    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+    for out in (_flat(report.render_terminal(rep)), report.render_markdown(rep)):
         assert out.count(_FULL_REFRESH.footnote) == 1
         assert out.count(_INCREMENTAL_FORM.footnote) == 1
         assert _FULL_REFRESH.tag in out and _INCREMENTAL_FORM.tag in out

@@ -9,6 +9,16 @@ from __future__ import annotations
 
 import json
 
+from dbt_costgate.layout import (
+    DEFAULT_WIDTH,
+    MIN_TABLE_WIDTH,
+    Column,
+    Palette,
+    display_width,
+    pad,
+    render_table,
+    wrap,
+)
 from dbt_costgate.models import (
     BASIS_LABELS,
     CostDelta,
@@ -16,6 +26,7 @@ from dbt_costgate.models import (
     Report,
     Status,
     format_money,
+    format_pct,
 )
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
@@ -166,7 +177,7 @@ def _delta_cell(d: CostDelta, currency: str) -> str:
 def _pct_cell(d: CostDelta) -> str:
     if d.error:
         return "not estimated"
-    return "—" if d.pct_delta is None else f"{d.pct_delta:+,.0f}%"
+    return format_pct(d.pct_delta)
 
 
 def _net_line(report: Report) -> str | None:
@@ -213,94 +224,261 @@ def _net_line(report: Report) -> str | None:
     return f"{label}: {figures}{caveat}"
 
 
-def render_terminal(report: Report) -> str:
-    lines: list[str] = []
+# --- terminal ---------------------------------------------------------------
+#
+# The terminal report is a table, and everything below exists to keep it one.
+# It used to write each model as a sentence — `name (tag): 819.20 GiB → 2.91 TiB
+# +264% USD +13.19/run` — which put every figure at a different column on every
+# row, ran past 100 characters, and wrapped. Nothing could be compared down a
+# column because there were no columns.
+#
+# Two consequences worth naming, because they look like content changes and are
+# not. Per-model warnings moved out from between the rows into a block below the
+# table: interleaved prose is what breaks a column scan in the first place, and
+# `render_markdown` had already grouped them this way. And `(24 runs)` stopped
+# being a parenthetical on the monthly figure and became its own column, which is
+# what it always was.
+
+_INDENT = 2
+# Comfortably past any name a dbt project actually uses; beyond it, the name is
+# the problem rather than the layout.
+_MAX_NAME = 44
+
+
+def _tag_cell(d: CostDelta) -> str:
+    flags = []
+    if d.is_new:
+        flags.append("new")
+    tag = _row_tag(d)
+    if tag:
+        flags.append(tag)
+    return ", ".join(flags)
+
+
+def _money_cell(value: float | None, currency: str, *, signed: bool) -> str:
+    return "—" if value is None else _money(value, currency, signed=signed)
+
+
+def _runs_cell(d: CostDelta) -> str:
+    return str(d.runs_per_month) if d.runs_per_month else "—"
+
+
+def _month_cost(d: CostDelta) -> float | None:
+    """Absolute mode's monthly figure: this run's cost, that many times."""
+    if d.usd_current is None or not d.runs_per_month:
+        return None
+    return d.usd_current * d.runs_per_month
+
+
+def _terminal_spec(report: Report) -> list[tuple[Column, object]]:
+    """Each column paired with the cell it reads off a delta.
+
+    One list rather than four hand-written table shapes, so a column's heading,
+    its alignment, when it is given up on a narrow terminal, and where its value
+    comes from are all stated in one place and cannot drift apart.
+
+    `drop_rank` says what a narrow terminal sacrifices first, and it is deliberate
+    rather than right-to-left: the run-cost column is the one a reader came for,
+    so it and the model name are never dropped, while the runs-per-month count and
+    the baseline byte figure are context that can go.
+    """
     d0 = report.disclosure
+    cur = d0.currency
+    priced = d0.priced
+    monthly = any(d.runs_per_month for d in report.deltas)
+
+    spec: list[tuple[Column, object]] = [
+        # Capped rather than unbounded: a name is identified by its ends, and one
+        # 120-character outlier must not cost every other column its place.
+        (Column("MODEL", align="left", max_width=_MAX_NAME), lambda d: d.name),
+        # Unheaded: `new` / `full-refresh` describe the row, and a heading over
+        # them would read as another measurement.
+        (Column("", align="left"), _tag_cell),
+    ]
+    if report.mode == "diff":
+        spec += [
+            (Column("BASELINE", drop_rank=2), lambda d: humanize_bytes(d.bytes_baseline)),
+            # Unpriced, the byte figures are the whole report, so `CURRENT` is
+            # what `Δ / RUN` is to a priced one and is never given up.
+            (
+                Column("CURRENT", drop_rank=4 if priced else None),
+                lambda d: humanize_bytes(d.bytes_current),
+            ),
+            (Column("Δ %", drop_rank=5 if priced else 3), lambda d: format_pct(d.pct_delta)),
+        ]
+        if priced:
+            spec.append(
+                (Column("Δ / RUN"), lambda d: _money_cell(d.usd_per_run_delta, cur, signed=True))
+            )
+            if monthly:
+                spec += [
+                    (
+                        Column("Δ / MONTH", drop_rank=3),
+                        lambda d: _money_cell(d.usd_per_month_delta, cur, signed=True),
+                    ),
+                    (Column("RUNS", drop_rank=1), _runs_cell),
+                ]
+    else:
+        spec.append((Column("SCANNED"), lambda d: humanize_bytes(d.bytes_current)))
+        if priced:
+            spec.append(
+                (Column("COST / RUN"), lambda d: _money_cell(d.usd_current, cur, signed=False))
+            )
+            if monthly:
+                spec += [
+                    (
+                        Column("COST / MONTH", drop_rank=2),
+                        lambda d: _money_cell(_month_cost(d), cur, signed=False),
+                    ),
+                    (Column("RUNS", drop_rank=1), _runs_cell),
+                ]
+    return spec
+
+
+def _keyed_block(pairs: list[tuple[str, str]], width: int, indent: int = 4) -> list[str]:
+    """`key   text` lines with the text aligned into a second column and wrapped
+    under itself, so a long note stays inside its own column instead of running
+    back under the key."""
+    if not pairs:
+        return []
+    key_width = max(display_width(k) for k, _ in pairs)
+    hang = indent + key_width + 2
+    lines: list[str] = []
+    for key, text in pairs:
+        body = wrap(text, width, indent=hang, hanging=hang)
+        lines.append(" " * indent + pad(key, key_width) + "  " + body[0].lstrip())
+        lines.extend(body[1:])
+    return lines
+
+
+def _model_blocks(report: Report, spec: list[tuple[Column, object]], width: int) -> list[str]:
+    """The narrow-terminal fallback: one labelled block per model.
+
+    Below ~60 cells a table costs more than it buys — every figure would be
+    truncated, which is worse than not lining them up. The same cells are printed,
+    one per line, so nothing is lost and nothing is cropped.
+    """
+    lines: list[str] = []
+    for d in report.deltas:
+        tag = _tag_cell(d)
+        lines.append(" " * _INDENT + d.name + (f"  ({tag})" if tag else ""))
+        # Headings verbatim, not lower-cased: `Δ` has a lower-case form and it is
+        # `δ`, which means something else entirely.
+        lines.extend(
+            _keyed_block(
+                [(column.header, cell(d)) for column, cell in spec[1:] if column.header],
+                width,
+                indent=_INDENT + 2,
+            )
+        )
+    return lines
+
+
+def _model_notes(report: Report) -> list[tuple[str, str]]:
+    """Per-model caveats, keyed by the model they are about.
+
+    The marker rides in the key column, where it stays aligned: `⚠` is a caveat
+    about a figure that exists, `•` is the absence of one, and collapsing the two
+    into undifferentiated prose would lose a distinction markdown keeps.
+    """
+    pairs = [(f"⚠ {d.name}", w) for d in report.deltas for w in _row_warnings(d)]
+    pairs += [(f"• {d.name}", d.error) for d in report.deltas if d.error]
+    return pairs
+
+
+def render_terminal(report: Report, *, width: int | None = None, color: bool = False) -> str:
+    width = width or DEFAULT_WIDTH
+    p = Palette(color)
+    d0 = report.disclosure
+    lines: list[str] = []
+
     regions = ", ".join(d0.regions) or "—"
     rate = next(iter(d0.regions.values()), None)
-    header = f"dbt-costgate — region: {regions}"
+    tail = ""
     if not d0.priced:
-        header += " · bytes only (no per-byte price configured)"
+        tail = " · bytes only (no per-byte price configured)"
     elif rate is not None:
-        header += f" · on-demand {_rate(d0.currency, rate)} · {d0.source}"
-    lines.append(header)
+        tail = f" · on-demand {_rate(d0.currency, rate)} · {d0.source}"
+    # Wrapped like everything else: at 60 columns the region, the rate and the
+    # rate's provenance do not fit on one line, and a header that overflows is
+    # the same defect this rewrite exists to remove.
+    head = wrap(f"dbt-costgate — region: {regions}{tail}", width, hanging=2)
+    lines.append(p.bold("dbt-costgate") + p.dim(head[0][len("dbt-costgate") :]))
+    lines.extend(p.dim(line) for line in head[1:])
     lines.append("")
 
     if not report.deltas:
-        lines.append("  No changed models to estimate.")
+        lines.append(" " * _INDENT + "No changed models to estimate.")
         lines.append("")
-        lines.append(f"  {_DRYRUN_NOTE}")
+        lines.extend(p.dim(line) for line in wrap(_DRYRUN_NOTE, width, indent=_INDENT))
         return "\n".join(lines)
 
-    diff = report.mode == "diff"
-    for d in report.deltas:
-        flags = []
-        if d.is_new:
-            flags.append("new")
-        tag = _row_tag(d)
-        if tag:
-            flags.append(tag)
-        flag_str = f"  ({', '.join(flags)})" if flags else ""
-        cur = d0.currency
-        if diff:
-            # The percentage leads in both cases; unpriced simply has no money after
-            # it. Keeps terminal and markdown reporting the same set of figures.
-            tail = f"{_pct_cell(d)}"
-            if d0.priced:
-                tail += f"   {_delta_cell(d, cur)}/run"
-                if d.usd_per_month_delta is not None:
-                    tail += (
-                        f"   {_money(d.usd_per_month_delta, cur, signed=True)}/month "
-                        f"({d.runs_per_month} runs)"
-                    )
-            lines.append(
-                f"  {d.name}{flag_str}: "
-                f"{humanize_bytes(d.bytes_baseline)} → {humanize_bytes(d.bytes_current)}   "
-                f"{tail}"
+    spec = _terminal_spec(report)
+    if width < MIN_TABLE_WIDTH:
+        lines.extend(_model_blocks(report, spec, width))
+    else:
+        rows = [[cell(d) for _, cell in spec] for d in report.deltas]
+        table, dropped = render_table(
+            [column for column, _ in spec], rows, width=width, indent=_INDENT
+        )
+        head, rule, *body = table
+        lines.extend([p.dim(head), p.dim(rule), *body])
+        if dropped:
+            # Never let a narrow window quietly remove a figure: a column that
+            # vanished without a word reads as a column that was never there.
+            lines.extend(
+                p.dim(line)
+                for line in wrap(
+                    f"{', '.join(dropped)} hidden — widen the terminal, or use --format json",
+                    width,
+                    indent=_INDENT,
+                )
             )
-        elif not d0.priced:
-            lines.append(f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned")
-        else:
-            cost = "not estimated" if d.error else f"{_money(d.usd_current, cur)}/run"
-            monthly = ""
-            if d.usd_current is not None and d.runs_per_month:
-                month_money = _money(d.usd_current * d.runs_per_month, cur)
-                monthly = f"   {month_money}/month ({d.runs_per_month} runs)"
-            lines.append(
-                f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned   {cost}{monthly}"
-            )
-        for w in _row_warnings(d):
-            lines.append(f"      ⚠ {w}")
-        if d.error:
-            lines.append(f"      • {d.error}")
-
-    footnotes = _basis_footnotes(report)
-    if footnotes:
-        lines.append("")
-        lines.extend(f"  ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
     if net:
         lines.append("")
-        lines.append(f"  {net}")
+        lines.append(p.bold(" " * _INDENT + net))
 
     lines.append("")
     v = report.verdict
     if v.status == Status.PASS:
-        lines.append("  GATE: PASS")
+        lines.append(p.green(p.bold(" " * _INDENT + "GATE: PASS")))
     else:
         label = "FAIL" if v.status == Status.FAIL else "WARN"
-        lines.append(f"  GATE: {label}")
+        paint = p.red if v.status == Status.FAIL else p.yellow
+        lines.append(paint(p.bold(" " * _INDENT + f"GATE: {label}")))
         for b in v.breaches:
-            lines.append(f"    - {b}")
+            lines.extend(wrap(f"- {b}", width, indent=_INDENT + 2, hanging=_INDENT + 4))
+
+    model_notes = _model_notes(report)
+    footnotes = _basis_footnotes(report)
+    if model_notes or footnotes:
+        lines.append("")
+        lines.append(p.dim(" " * _INDENT + "NOTES"))
+        lines.extend(_keyed_block(model_notes, width, indent=_INDENT + 2))
+        # Unkeyed, and last: a footnote is about a tag several rows share rather
+        # than about any one model, and it already opens by naming that tag — so
+        # a key column beside it would only print the tag twice. Verbatim, so the
+        # sentence a reader sees here is the one they see in the pull request.
+        for note in footnotes:
+            lines.extend(wrap(f"⚠ {note}", width, indent=_INDENT + 2, hanging=_INDENT + 4))
+
     lines.append("")
     # Notices sit with the disclosure, not with the gate: both describe how this
-    # run was configured rather than what the change did.
-    for n in report.notices:
-        # The id leads: it is what a user puts in `notices.silence`, so it has to
-        # be visible without going and looking it up.
-        lines.append(f"  ⚠ {n.id}: {n.message}")
-    lines.extend(f"  {note}" for note in _footer_notes(d0))
+    # run was configured rather than what the change did. The id leads — it is
+    # what a user puts in `notices.silence`, so it has to be visible without
+    # going and looking it up.
+    if report.notices:
+        lines.extend(
+            _keyed_block([(f"⚠ {n.id}", n.message) for n in report.notices], width, indent=_INDENT)
+        )
+        lines.append("")
+    # No heading over the footer: the first note already opens with `Pricing:`,
+    # and a `PRICING` label above it just said the word twice. Dimmed and set
+    # apart by the blank line, which is enough to read as a footer.
+    for note in _footer_notes(d0):
+        lines.extend(p.dim(line) for line in wrap(note, width, indent=_INDENT, hanging=_INDENT + 2))
     return "\n".join(lines)
 
 
@@ -477,9 +655,11 @@ def render_json(report: Report) -> str:
     return json.dumps(payload, indent=2)
 
 
-def render(report: Report, fmt: str) -> str:
+def render(report: Report, fmt: str, *, width: int | None = None, color: bool = False) -> str:
+    """`width` and `color` are terminal-only; markdown and JSON are the same bytes
+    wherever they are rendered, which is what makes them safe to diff and to post."""
     if fmt == "markdown":
         return render_markdown(report)
     if fmt == "json":
         return render_json(report)
-    return render_terminal(report)
+    return render_terminal(report, width=width, color=color)

@@ -196,7 +196,7 @@ def test_baseline_target_manifest_produces_diff(tmp_path: Path, capsys):
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "→" in out  # a before/after diff row rendered
+    assert "BASELINE" in out  # a before/after diff table rendered, not an absolute one
 
 
 def test_default_baseline_used_without_any_flag(tmp_path: Path, capsys):
@@ -212,7 +212,7 @@ def test_default_baseline_used_without_any_flag(tmp_path: Path, capsys):
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "→" in out
+    assert "BASELINE" in out
 
 
 def test_unknown_baseline_target_exits_2(tmp_path: Path, capsys):

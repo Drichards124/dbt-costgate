@@ -173,7 +173,16 @@ def build_deltas(
                 runs_per_month=config.runs_per_month(est.name),
             )
         )
-    deltas.sort(key=lambda d: d.usd_per_run_delta or 0.0, reverse=True)
+    # Most expensive first, with bytes as the tie-break rather than an
+    # afterthought: under slot pricing every rate is 0, so every dollar delta is
+    # 0.0 as well, and sorting on money alone left an unpriced report in whatever
+    # order the models arrived in — the 2.91 TiB model listed below the 412 MiB
+    # one. The byte delta ranks a diff, the current scan ranks a run with no
+    # baseline to have a delta from.
+    deltas.sort(
+        key=lambda d: (d.usd_per_run_delta or 0.0, d.bytes_delta or 0, d.bytes_current or 0),
+        reverse=True,
+    )
     return deltas
 
 

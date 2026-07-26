@@ -101,10 +101,10 @@ dbt-costgate check --baseline path/to/main/manifest.json
 ```text
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
-  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +395.63/month (30 runs)
-  dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
-
-  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+  MODEL                             BASELINE     CURRENT    Δ %     Δ / RUN    Δ / MONTH  RUNS
+  ────────────────  ────────────  ──────────  ──────────  ─────  ──────────  ───────────  ────
+  fct_orders_daily  full-refresh  819.20 GiB    2.91 TiB  +264%  USD +13.19  USD +395.63    30
+  dim_customers     new                    —  412.50 MiB      —   USD +0.00    USD +0.07    30
 
   Net increase: USD 13.19/run · USD 395.70/month
 
@@ -112,8 +112,13 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: USD +13.19/run exceeds USD 5.00
     - fct_orders_daily: +264% exceeds 25%
 
+  NOTES
+    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
+      of one incremental run.
+
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
-  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing
+    account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: diff-terminal -->

@@ -28,6 +28,34 @@ def format_money(value: float | None, currency: str, *, signed: bool = False) ->
     return f"{currency} {value:+,.2f}" if signed else f"{currency} {value:,.2f}"
 
 
+def format_pct(value: float | None, *, signed: bool = True) -> str:
+    """Render a percentage at whatever precision it actually needs: `+264%`,
+    `+0.4%`, `0.35%`.
+
+    Here beside `format_money`, and for the same reason: the report renders a
+    model's growth and `policy.py` renders the limit it exceeded, and the two
+    have to agree. Fixed at zero decimal places in both places, they produced the
+    breach line `+0% exceeds 0%` for a real 0.4% increase over a 0.3% limit —
+    a correct gate failure that read like a bug.
+
+    Precision follows the magnitude, because decimals earn their place at one end
+    of the range and are noise at the other: `+264%` says everything `+263.75%`
+    does, while `+0%` throws away the whole number. Under 1 gets two places, under
+    10 gets one, and everything above is whole.
+
+    Trailing zeros are trimmed by splitting on the decimal point rather than by
+    `rstrip`, which would eat the zeros out of `1,200.00` as well.
+    """
+    if value is None:
+        return "—"
+    size = abs(value)
+    places = 2 if size < 1 else 1 if size < 10 else 0
+    text = f"{value:+,.{places}f}" if signed else f"{value:,.{places}f}"
+    whole, _, frac = text.partition(".")
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac}%" if frac else f"{whole}%"
+
+
 @dataclass(frozen=True)
 class Notice:
     """One run-level advisory, and the id that identifies it in config.
