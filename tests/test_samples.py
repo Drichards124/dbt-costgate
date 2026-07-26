@@ -217,3 +217,34 @@ def test_the_documented_pre_commit_rev_matches_the_version_we_ship():
         if pinned != {f"v{__version__}"}:
             stale.append(f"{site} pins {sorted(pinned)}, package version is {__version__}")
     assert not stale, "release prep missed a site:\n  " + "\n  ".join(stale)
+
+
+# The published image is pinned by tag exactly the way the Action is pinned by
+# `uses:` and the hook by `rev:` — a third version a reader copies verbatim, and
+# the newest, so the one most likely to be forgotten at the next release.
+
+# Version-shaped rather than `\S+`: a pin inside inline code or followed by
+# punctuation would otherwise capture the trailing backtick or comma, and the
+# mismatch it reported would be about the markdown rather than the version.
+_IMAGE_PIN = __import__("re").compile(r"ghcr\.io/drichards124/dbt-costgate:(v\d+\.\d+\.\d+)")
+_IMAGE_SITES = ["docs/usage.md", "README.md"]
+
+
+def test_the_documented_image_tag_matches_the_version_we_ship():
+    """`:latest` is deliberately excluded from the match — the docs tell readers
+    to pin a version, so a documented example quietly using the moving tag would
+    be advising against itself. Only concrete `:vX.Y.Z` pins are compared.
+
+    Every site is required to still contain one. A file that stopped showing a
+    pinned pull would otherwise drop out of this check in silence, which is the
+    same failure as being stale except nothing says so.
+    """
+    from dbt_costgate import __version__
+
+    stale = []
+    for site in _IMAGE_SITES:
+        pinned = set(_IMAGE_PIN.findall((ROOT / site).read_text("utf-8")))
+        assert pinned, f"{site} no longer shows a version-pinned image example to check"
+        if pinned != {f"v{__version__}"}:
+            stale.append(f"{site} pulls {sorted(pinned)}, package version is {__version__}")
+    assert not stale, "release prep missed a site:\n  " + "\n  ".join(stale)
