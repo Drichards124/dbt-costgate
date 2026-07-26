@@ -265,14 +265,24 @@ def test_missing_manifest_is_operational_exit_2(tmp_path: Path, capsys):
 
 
 def test_destination_missing_only_does_not_exit_2(tmp_path: Path, capsys):
+    """An incremental model whose table does not exist yet is an expected state in
+    a fresh schema, not a broken gate — so it stays out of exit 2, which is
+    reserved for "dbt-costgate itself could not run" and alerts a pipeline.
+
+    It is exit 1, though. Nothing was measured, so nothing was checked, and this
+    run has no business reporting PASS: exactly the shape that let a whole
+    project of 404s through with exit 0. `fail_on: never` is the way out for a
+    team that expects it.
+    """
     target = _target(
         tmp_path, make_node("inc", materialized="incremental", compiled_code="CUR_inc")
     )
     runner = FakeDryRunner({"CUR_inc": ErrorKind.DESTINATION_MISSING})
     code = main(["check", "--current", str(target), "--select", "inc"], runner=runner)
     out = capsys.readouterr().out
-    assert code == 0
+    assert code == 1
     assert "not estimated" in out
+    assert "nothing was checked" in " ".join(out.split())
 
 
 def test_all_operational_failures_exit_2(tmp_path: Path, capsys):

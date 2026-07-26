@@ -140,11 +140,10 @@ def test_a_materialized_view_says_its_figure_is_not_the_recurring_cost(tmp_path:
     assert payload["models"][0]["warnings"], "a materialized view needs a refresh-cost caveat"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F02: a selected model that is dropped by type leaves no trace in the report",
-)
-def test_selecting_an_ephemeral_model_says_it_was_skipped(tmp_path: Path, capsys):
+def test_selecting_an_ephemeral_model_says_why_it_cannot_be_priced(tmp_path: Path, capsys):
+    """BUG-F02. Naming a model that exists and getting silence back — or worse,
+    "no such model" — reads as a bug in the tool. It exists; it just has no
+    relation of its own to scan."""
     target = write_target(
         tmp_path,
         make_manifest(
@@ -152,6 +151,9 @@ def test_selecting_an_ephemeral_model_says_it_was_skipped(tmp_path: Path, capsys
             make_node("keep", compiled_code="K"),
         ),
     )
-    _check(target, "--select", "eph,keep", runner=FakeDryRunner({"K": TIB}))
-    captured = capsys.readouterr()
-    assert "eph" in captured.out + captured.err, "the skipped model is never mentioned anywhere"
+    code = _check(target, "--select", "eph,keep", runner=FakeDryRunner({"K": TIB}))
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "eph" in err
+    assert "ephemeral models have no relation of their own" in err
+    assert "no such model" not in err

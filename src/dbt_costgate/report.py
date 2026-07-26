@@ -177,6 +177,10 @@ def _delta_cell(d: CostDelta, currency: str) -> str:
 def _pct_cell(d: CostDelta) -> str:
     if d.error:
         return "not estimated"
+    # A ratio to a zero baseline does not exist, so the cell says what happened
+    # instead of printing the `—` that reads as "nothing to report here".
+    if d.grew_from_zero:
+        return "from 0"
     return format_pct(d.pct_delta)
 
 
@@ -304,7 +308,10 @@ def _terminal_spec(report: Report) -> list[tuple[Column, object]]:
                 Column("CURRENT", drop_rank=4 if priced else None),
                 lambda d: humanize_bytes(d.bytes_current),
             ),
-            (Column("Δ %", drop_rank=5 if priced else 3), lambda d: format_pct(d.pct_delta)),
+            (
+                Column("Δ %", drop_rank=5 if priced else 3),
+                lambda d: "from 0" if d.grew_from_zero else format_pct(d.pct_delta),
+            ),
         ]
         if priced:
             spec.append(
@@ -637,6 +644,10 @@ def render_json(report: Report) -> str:
                 "basis": d.basis.value if d.basis else None,
                 "is_new": d.is_new,
                 "gateable": d.gateable,
+                # Why not, when not. `gateable` alone cannot tell a consumer
+                # whether the user excluded this model or the gate could not
+                # measure it, and those mean opposite things to a dashboard.
+                "skip_reason": d.skip_reason.value if d.skip_reason else None,
                 "region": d.region,
                 "bytes_baseline": d.bytes_baseline,
                 "bytes_current": d.bytes_current,

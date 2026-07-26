@@ -16,29 +16,68 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 from dbt_costgate import policy
-from dbt_costgate.models import Notice, PricingDisclosure
+from dbt_costgate.models import CostDelta, Notice, PricingDisclosure
 
 if TYPE_CHECKING:  # pragma: no cover
     from dbt_costgate.config import Config
     from dbt_costgate.pricing import PricingTable
+
+Check = Callable[["Config", "PricingTable", PricingDisclosure, "list[CostDelta]"], "str | None"]
 
 # id -> the check that produces its message (or None when it does not apply).
 # Ids are a public contract: they appear in reports, in `notices.silence`, and in
 # the JSON payload, so renaming one breaks a user's config. Retire an id by
 # leaving it here inert rather than deleting it, so an existing `silence` entry
 # keeps validating.
-_CHECKS: tuple[tuple[str, Callable[[Config, PricingTable, PricingDisclosure], str | None]], ...] = (
+_CHECKS: tuple[tuple[str, Check], ...] = (
     (
         "dead-money-thresholds",
-        lambda config, table, disclosure: policy.unpriced_threshold_notice(
+        lambda config, table, disclosure, deltas: policy.unpriced_threshold_notice(
             config.thresholds, disclosure.priced
         ),
     ),
     (
         "unverified-region-rate",
-        lambda config, table, disclosure: table.fallback_notice(disclosure.region_sources),
+        lambda config, table, disclosure, deltas: table.fallback_notice(disclosure.region_sources),
+    ),
+    (
+        "new-models-not-percentage-gated",
+        lambda config, table, disclosure, deltas: _new_models_ungated(config, deltas),
     ),
 )
+
+
+def _new_models_ungated(config: Config, deltas: list[CostDelta]) -> str | None:
+    """`max_pct_increase` alone cannot gate a model that has no baseline.
+
+    A percentage needs a before and an after, and a brand-new model has only an
+    after — so on a repo gated only on percent, adding a model is entirely
+    ungated and nothing says so. It is not a failed check: adding models is
+    ordinary, and blocking every pull request that does would teach a team to
+    turn the gate off. It is a gap in the configuration, which is what a notice
+    is for, and the two thresholds that do work without a baseline are named.
+    """
+    thr = config.thresholds
+    percent_only = thr.max_pct_increase is not None and not any(
+        getattr(thr, key) is not None
+        for key in (
+            "max_usd_increase_per_run",
+            "max_usd_increase_per_month",
+            "max_usd_total",
+            "max_tib_total",
+        )
+    )
+    if not percent_only:
+        return None
+    new = sorted(d.name for d in deltas if d.is_new)
+    if not new:
+        return None
+    return (
+        f"thresholds.max_pct_increase cannot gate a new model — there is no baseline to grow "
+        f"from — so {', '.join(new)} went through ungated. Add thresholds.max_usd_total or "
+        f"thresholds.max_tib_total, which need no baseline."
+    )
+
 
 NOTICE_IDS: tuple[str, ...] = tuple(notice_id for notice_id, _ in _CHECKS)
 
@@ -55,13 +94,18 @@ def advisory_tail(notice_id: str) -> str:
     )
 
 
-def collect(config: Config, table: PricingTable, disclosure: PricingDisclosure) -> list[Notice]:
+def collect(
+    config: Config,
+    table: PricingTable,
+    disclosure: PricingDisclosure,
+    deltas: list[CostDelta] | None = None,
+) -> list[Notice]:
     silenced = set(config.silence_notices)
     out: list[Notice] = []
     for notice_id, check in _CHECKS:
         if notice_id in silenced:
             continue
-        message = check(config, table, disclosure)
+        message = check(config, table, disclosure, deltas or [])
         if message:
             out.append(Notice(id=notice_id, message=f"{message} {advisory_tail(notice_id)}"))
     return out

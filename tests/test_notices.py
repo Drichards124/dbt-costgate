@@ -3,8 +3,23 @@
 
 from dbt_costgate import notices
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import PricingDisclosure
+from dbt_costgate.models import CostDelta, PricingDisclosure
 from dbt_costgate.pricing import PricingTable
+
+
+def _new_model(name="dim_new"):
+    return CostDelta(
+        name=name,
+        unique_id=f"model.pkg.{name}",
+        is_incremental=False,
+        is_new=True,
+        gateable=True,
+        bytes_baseline=None,
+        bytes_current=1024,
+        usd_baseline=None,
+        usd_current=0.01,
+        region="US",
+    )
 
 
 def _disclosure(rate=0.0, source="user-override", region="US"):
@@ -24,7 +39,11 @@ def _config(**kw):
 
 def test_ids_are_unique_and_every_check_is_reachable():
     assert len(notices.NOTICE_IDS) == len(set(notices.NOTICE_IDS))
-    assert set(notices.NOTICE_IDS) == {"dead-money-thresholds", "unverified-region-rate"}
+    assert set(notices.NOTICE_IDS) == {
+        "dead-money-thresholds",
+        "unverified-region-rate",
+        "new-models-not-percentage-gated",
+    }
 
 
 def test_collect_produces_the_notice_that_applies():
@@ -75,13 +94,19 @@ def test_every_notice_ends_by_naming_its_own_silencing_id():
     a notice can never tell a user to silence an id that is not its own."""
     table = PricingTable.load()
     cases = [
-        (_config(), _disclosure()),
+        (_config(), _disclosure(), []),
         (
             _config(thresholds=Thresholds()),
             _disclosure(rate=6.25, source="default-fallback", region="mars-central1"),
+            [],
+        ),
+        (
+            _config(thresholds=Thresholds(max_pct_increase=25.0)),
+            _disclosure(rate=6.25, source="region-table"),
+            [_new_model()],
         ),
     ]
-    produced = [n for config, d in cases for n in notices.collect(config, table, d)]
+    produced = [n for config, d, deltas in cases for n in notices.collect(config, table, d, deltas)]
     assert {n.id for n in produced} == set(notices.NOTICE_IDS)  # every check exercised
     for n in produced:
         assert n.message.endswith(f"Silence it with notices.silence: [{n.id}].")

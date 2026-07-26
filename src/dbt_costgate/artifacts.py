@@ -81,6 +81,34 @@ def model_nodes(manifest: dict) -> dict[str, ModelNode]:
     return out
 
 
+def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
+    """Nodes `model_nodes` drops, mapped to why — name -> reason.
+
+    They are filtered out before anything can count them, so a branch that only
+    touches a seed, a snapshot, an ephemeral or a Python model was
+    indistinguishable from a branch that changed nothing: both printed "No
+    changed models to estimate". Being out of scope is defensible; being
+    indistinguishable from "nothing happened" is not, and a snapshot really does
+    run a MERGE and really does scan bytes.
+    """
+    out: dict[str, str] = {}
+    for unique_id, node in (manifest.get("nodes") or {}).items():
+        name = node.get("name", unique_id)
+        resource_type = node.get("resource_type")
+        config = node.get("config") or {}
+        if resource_type != "model":
+            if resource_type in ("seed", "snapshot", "test", "analysis", "operation"):
+                out[name] = f"{resource_type}s are not priced"
+        elif node.get("language", "sql") != "sql":
+            out[name] = "Python models are not priced — dbt-costgate estimates SQL scans"
+        elif config.get("materialized") == "ephemeral":
+            out[name] = (
+                "ephemeral models have no relation of their own; their SQL is inlined into "
+                "the models that select from them, and the cost shows up there"
+            )
+    return out
+
+
 def has_any_compiled_code(nodes: dict[str, ModelNode]) -> bool:
     return any(n.compiled_code for n in nodes.values())
 

@@ -144,11 +144,6 @@ def test_a_priced_delta_never_disagrees_in_sign_with_its_byte_delta(baseline, cu
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F19: models.py:250 returns None when bytes_baseline is falsy, so a "
-    "model that went from 0 B to 4 TiB cannot breach max_pct_increase",
-)
 def test_growth_from_a_zero_byte_baseline_breaches_a_percentage_gate(tmp_path: Path):
     code = _diff(
         tmp_path,
@@ -161,12 +156,18 @@ def test_growth_from_a_zero_byte_baseline_breaches_a_percentage_gate(tmp_path: P
     assert code == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F20: a new model has no baseline, so pct_delta is None and a repo "
-    "gated only on max_pct_increase does not gate new models at all",
-)
-def test_a_brand_new_model_can_breach_a_percentage_only_gate(tmp_path: Path):
+def test_a_percentage_only_gate_says_it_cannot_cover_a_new_model(tmp_path: Path, capsys):
+    """BUG-F20, resolved as a notice rather than a failure.
+
+    A percentage needs a before and an after; a brand-new model has only an
+    after, so `max_pct_increase` alone leaves it entirely ungated. Failing the
+    run was the first instinct and is the wrong one — adding a model is an
+    ordinary thing to do in a pull request, and blocking every such request
+    teaches a team to switch the gate off. So it exits 0 and says, by name, which
+    models went through unchecked and which two thresholds would have caught
+    them. (The assertion here changed deliberately when the fix landed; it used
+    to demand exit 1.)
+    """
     code = _diff(
         tmp_path,
         "--max-pct",
@@ -175,7 +176,25 @@ def test_a_brand_new_model_can_breach_a_percentage_only_gate(tmp_path: Path):
         baseline_specs=[make_node("kept", compiled_code="KEPT", checksum="k")],
         responses={"CUR": 40 * TIB, "KEPT": TIB},
     )
-    assert code == 1
+    out = " ".join(capsys.readouterr().out.split())
+    assert code == 0
+    assert "new-models-not-percentage-gated" in out
+    assert "brand_new went through ungated" in out
+    assert "max_tib_total" in out
+
+
+def test_that_notice_stays_quiet_once_a_baseline_free_threshold_is_set(tmp_path: Path, capsys):
+    _diff(
+        tmp_path,
+        "--max-pct",
+        "1",
+        "--max-tib-total",
+        "100",
+        current=[make_node("brand_new", compiled_code="CUR", checksum="n")],
+        baseline_specs=[make_node("kept", compiled_code="KEPT", checksum="k")],
+        responses={"CUR": 40 * TIB, "KEPT": TIB},
+    )
+    assert "new-models-not-percentage-gated" not in capsys.readouterr().out
 
 
 def test_a_sub_one_percent_breach_says_which_numbers_it_compared(tmp_path: Path, capsys):

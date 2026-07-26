@@ -128,11 +128,6 @@ def test_an_empty_manifest_is_not_an_error(tmp_path: Path, capsys):
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F07: a basis mismatch sets gateable=False (estimate.py:125), so no "
-    "threshold and no fail_on setting can block a regression on that model",
-)
 def test_a_basis_mismatch_does_not_silently_disarm_the_gate(tmp_path: Path):
     # Baseline compiled fresh (full-refresh), branch compiled against the built
     # table (incremental form) — the shape a stashed production manifest has.
@@ -176,11 +171,6 @@ def test_a_basis_mismatch_does_not_silently_disarm_the_gate(tmp_path: Path):
     assert code == 1, "a 700% increase must not pass because the two sides disagree on basis"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F14: UPSTREAM_MISSING is non-operational, so a run that estimated "
-    "nothing at all still reports PASS and exit 0",
-)
 def test_a_run_that_estimated_nothing_does_not_report_pass(tmp_path: Path, capsys):
     target = write_target(
         tmp_path,
@@ -195,11 +185,81 @@ def test_a_run_that_estimated_nothing_does_not_report_pass(tmp_path: Path, capsy
     assert code != 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F01: cli.py:237 returns [] for an unmatched --select, so a typo in a "
-    "CI selection list gates nothing and the pull request goes green",
-)
+def _unmeasurable(tmp_path: Path) -> tuple[Path, FakeDryRunner]:
+    """One model that estimates fine, one whose dry-run never returns a size."""
+    target = write_target(
+        tmp_path,
+        make_manifest(
+            make_node("ok", compiled_code="OK"),
+            make_node("denied", compiled_code="DENIED"),
+        ),
+    )
+    return target, FakeDryRunner({"OK": TIB, "DENIED": ErrorKind.UPSTREAM_MISSING})
+
+
+def test_a_model_that_could_not_be_measured_fails_a_run_that_asked_for_enforcement(
+    tmp_path: Path, capsys
+):
+    target, runner = _unmeasurable(tmp_path)
+    code = main(
+        ["check", "--current", str(target), "--select", "ok,denied", "--max-tib-total", "99"],
+        runner=runner,
+    )
+    assert code == 1
+    assert "denied: not checked" in " ".join(capsys.readouterr().out.split())
+
+
+def test_the_same_run_is_informational_when_no_threshold_is_configured(tmp_path: Path):
+    """A zero-setup local look configures nothing and enforces nothing, so a model
+    it could not measure is not a failure — there was no check to miss."""
+    target, runner = _unmeasurable(tmp_path)
+    code = main(["check", "--current", str(target), "--select", "ok,denied"], runner=runner)
+    assert code == 0
+
+
+def test_excluding_a_model_by_name_is_the_way_to_accept_one_that_never_measures(tmp_path: Path):
+    """The escape hatch has to be a real one. A model whose dry-run always fails —
+    an external table the service account cannot see, say — must be acceptable by
+    name rather than forcing the whole gate off."""
+    target, runner = _unmeasurable(tmp_path)
+    (tmp_path / ".dbt-costgate.yml").write_text("exclude: denied\n", "utf-8")
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--select",
+            "ok,denied",
+            "--max-tib-total",
+            "99",
+            "--config",
+            str(tmp_path / ".dbt-costgate.yml"),
+        ],
+        runner=runner,
+    )
+    assert code == 0
+
+
+def test_fail_on_never_still_lets_an_unchecked_model_through(tmp_path: Path, capsys):
+    target, runner = _unmeasurable(tmp_path)
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--select",
+            "ok,denied",
+            "--max-tib-total",
+            "99",
+            "--fail-on",
+            "never",
+        ],
+        runner=runner,
+    )
+    assert code == 0
+    assert "not checked" in " ".join(capsys.readouterr().out.split())
+
+
 def test_selecting_a_model_that_does_not_exist_is_an_error(tmp_path: Path):
     target = write_target(tmp_path, make_manifest(make_node("real", compiled_code="SQL")))
     code = main(
@@ -246,11 +306,6 @@ def test_an_unwritable_output_path_exits_operational(tmp_path: Path):
     assert code == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F06: Report.estimated filters on bytes_delta only, so a model whose "
-    "own diff was just declared incomparable still lands in the net line",
-)
 def test_the_net_line_excludes_a_basis_mismatched_model(tmp_path: Path, capsys):
     target = write_target(
         tmp_path,

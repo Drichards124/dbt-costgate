@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import sys
 from pathlib import Path
@@ -248,12 +249,45 @@ def _validate_resolved_config(table: PricingTable, config: Config, disclosure) -
         )
 
 
+def _unmatched_selection(missing, current_nodes, out_of_scope: dict[str, str]) -> str:
+    """The message for a `--select` name that selected nothing.
+
+    A name can miss for two quite different reasons, and telling them apart is
+    the whole value of the message: the model may not exist (a typo, or a stale
+    list), or it may exist and be a kind dbt-costgate does not price. "No such
+    model" for a snapshot the user can see in their project reads as a bug in the
+    tool.
+    """
+    known = sorted(node.name for node in current_nodes.values())
+    parts = []
+    for name in missing:
+        if name in out_of_scope:
+            parts.append(f"{name} — {out_of_scope[name]}")
+            continue
+        close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+        parts.append(f"{name} (did you mean {close[0]}?)" if close else f"{name} — no such model")
+    return "--select matched nothing for: " + "; ".join(parts) + "."
+
+
 def _select(
-    args, current_nodes, baseline_nodes, project_dir, renames=None, macros=None
+    args, current_nodes, baseline_nodes, project_dir, renames=None, macros=None, out_of_scope=None
 ) -> list[str]:
+    out_of_scope = out_of_scope or {}
     if args.select:
         wanted = {s.strip() for s in args.select.split(",") if s.strip()}
-        return [uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted]
+        selected = [
+            uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted
+        ]
+        # A name that matched nothing is a usage error, not an empty selection.
+        # It used to return `[]` in silence, so `--select` built from a script —
+        # the pattern the docs recommend, piping `dbt ls --select state:modified`
+        # — checked nothing at all the day that list went stale, and the pull
+        # request went green.
+        matched = set(selected) | {current_nodes[uid].name for uid in selected}
+        missing = sorted(wanted - matched)
+        if missing:
+            raise _UsageError(_unmatched_selection(missing, current_nodes, out_of_scope))
+        return selected
     if baseline_nodes is not None:
         return artifacts.select_changed(baseline_nodes, current_nodes, renames)
     paths = gitdiff.changed_paths(project_dir, args.base)
@@ -337,6 +371,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         return policy.EXIT_OPERATIONAL
     current_nodes = artifacts.model_nodes(current_manifest)
     macros = artifacts.macro_index(current_manifest)
+    out_of_scope = artifacts.out_of_scope_nodes(current_manifest)
 
     baseline_nodes = None
     if eff_baseline:
@@ -381,8 +416,10 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             return policy.EXIT_OPERATIONAL
 
     try:
-        selected = _select(args, current_nodes, baseline_nodes, project_dir, renames, macros)
-    except GitDiffError as exc:
+        selected = _select(
+            args, current_nodes, baseline_nodes, project_dir, renames, macros, out_of_scope
+        )
+    except (GitDiffError, _UsageError) as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
 
@@ -443,7 +480,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         disclosure=disclosure,
         verdict=verdict,
         mode="diff" if diff_mode else "absolute",
-        notices=notices.collect(config, table, disclosure),
+        notices=notices.collect(config, table, disclosure, deltas),
     )
 
     # A report going to a file is not going to this terminal: it is rendered at a

@@ -78,6 +78,53 @@ class EstimateBasis(str, Enum):
     INCREMENTAL_FORM = "incremental_form"  # incremental compiled against an existing table
 
 
+class SkipReason(str, Enum):
+    """Why a model was not gated — and, crucially, which kind of "not gated".
+
+    `gateable=False` used to mean two unrelated things at once. *The user told us
+    not to gate this model* is a decision the gate should respect. *We could not
+    gate this model* is the gate failing at its one job, and treating the two the
+    same is how a +264% regression passed with five thresholds set to nearly
+    zero: the baseline had been compiled a different way, the comparison was
+    dropped, and the verdict was `PASS`.
+
+    The two groups below are what tells them apart. `is_unchecked` is the line.
+    """
+
+    # Policy: the user asked for this.
+    EXCLUDED = "excluded"
+    WARN_ONLY = "warn_only"
+    # Failure: the gate wanted to check and could not.
+    NO_COMPILED_SQL = "no_compiled_sql"
+    DRY_RUN_FAILED = "dry_run_failed"
+    NO_BASELINE_SQL = "no_baseline_sql"
+    BASIS_MISMATCH = "basis_mismatch"
+
+    @property
+    def is_unchecked(self) -> bool:
+        return self not in (SkipReason.EXCLUDED, SkipReason.WARN_ONLY)
+
+
+# What a report says about a model the gate could not check. Plain language, and
+# each one ends in the thing the reader can do about it.
+SKIP_REASON_MESSAGES: dict[SkipReason, str] = {
+    SkipReason.NO_COMPILED_SQL: (
+        "there is no compiled SQL for it, so nothing could be measured — run `dbt compile`"
+    ),
+    SkipReason.DRY_RUN_FAILED: (
+        "its dry-run did not return a size, so there is no figure to compare against a threshold"
+    ),
+    SkipReason.NO_BASELINE_SQL: (
+        "the baseline has no compiled SQL for it, so there is nothing to compare against — "
+        "the baseline must come from `dbt compile`, not `dbt parse`"
+    ),
+    SkipReason.BASIS_MISMATCH: (
+        "the baseline and this branch were compiled differently, so their two figures answer "
+        "different questions — recompile the baseline the same way"
+    ),
+}
+
+
 class ErrorKind(str, Enum):
     """Why a dry-run did not yield bytes. Only *operational* kinds can make a
     whole run fail with exit 2; ``DESTINATION_MISSING`` is expected in fresh
@@ -159,7 +206,14 @@ class ModelEstimate:
     basis_baseline: EstimateBasis | None = None
     basis_current: EstimateBasis | None = None
     warnings: list[str] = field(default_factory=list)
-    gateable: bool = True
+    # Why this model will not be gated, if it will not. `gateable` is derived
+    # from it rather than set alongside it, so the two cannot disagree about a
+    # model — which is exactly how the reason for skipping got lost.
+    skip_reason: SkipReason | None = None
+
+    @property
+    def gateable(self) -> bool:
+        return self.skip_reason is None
 
     @property
     def name(self) -> str:
@@ -243,6 +297,28 @@ class CostDelta:
     # hand-built delta stays constructible, and so an unknown basis leaves a row
     # unlabelled rather than mislabelled.
     basis: EstimateBasis | None = None
+    # Why this model is not gated. `gateable` says *whether*; this says *which
+    # kind*, and the gate needs the difference: a model the user excluded is a
+    # decision, a model that could not be measured is a hole.
+    skip_reason: SkipReason | None = None
+
+    @property
+    def unchecked(self) -> bool:
+        """The gate wanted to check this model and could not."""
+        return self.skip_reason is not None and self.skip_reason.is_unchecked
+
+    @property
+    def grew_from_zero(self) -> bool:
+        """The baseline scanned nothing and this change scans something.
+
+        `pct_delta` is `None` here, because there is no ratio to a zero baseline
+        — which quietly took `max_pct_increase` out of play for exactly the model
+        it should catch hardest. `math.inf` would say it numerically, but
+        `Infinity` is not valid JSON (RFC 8259), so a report carrying it would
+        fail `jq` and any strict parser. The fact travels as this flag instead,
+        and `bytes_baseline: 0` beside `bytes_current: N` already says the rest.
+        """
+        return self.bytes_baseline == 0 and (self.bytes_current or 0) > 0
 
     @property
     def bytes_delta(self) -> int | None:
@@ -340,8 +416,20 @@ class Report:
     @property
     def estimated(self) -> list[CostDelta]:
         """Models with a usable before/after. Bytes, not dollars, decide this —
-        an unpriced run has real byte deltas and zero-valued money ones."""
-        return [d for d in self.deltas if d.bytes_delta is not None]
+        an unpriced run has real byte deltas and zero-valued money ones.
+
+        A basis mismatch is excluded, and it is the one exclusion that is not
+        about policy. `exclude` and `warn_only` say a model must not *fail the
+        gate*; the model still spends money, so it belongs in the total. A basis
+        mismatch says the two numbers cannot be subtracted at all — and having
+        printed exactly that warning, the report went on to headline `Net saving:
+        USD 4.31/run`, a single incremental run taken off a full rebuild.
+        """
+        return [
+            d
+            for d in self.deltas
+            if d.bytes_delta is not None and d.skip_reason is not SkipReason.BASIS_MISMATCH
+        ]
 
     @property
     def net_bytes(self) -> int | None:

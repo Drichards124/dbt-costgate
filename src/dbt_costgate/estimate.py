@@ -12,7 +12,13 @@ from pathlib import Path
 from dbt_costgate import artifacts
 from dbt_costgate.bigquery import DryRunner
 from dbt_costgate.config import Config
-from dbt_costgate.models import ERROR_KIND_REASONS, CostDelta, ModelEstimate, ModelNode
+from dbt_costgate.models import (
+    ERROR_KIND_REASONS,
+    CostDelta,
+    ModelEstimate,
+    ModelNode,
+    SkipReason,
+)
 from dbt_costgate.pricing import PricingTable
 
 # Not a warehouse failure but a local one, so it carries no ErrorKind. Named
@@ -82,7 +88,7 @@ def _estimate_one(
     if not current_sql:
         est.error_kind = None
         est.error_detail = NO_COMPILED_SQL
-        est.gateable = False
+        est.skip_reason = SkipReason.NO_COMPILED_SQL
         return est
 
     res = runner.dry_run(current_sql, node.relation_name)
@@ -93,7 +99,7 @@ def _estimate_one(
     else:
         est.error_kind = res.error_kind
         est.error_detail = res.error_detail
-        est.gateable = False
+        est.skip_reason = SkipReason.DRY_RUN_FAILED
 
     if diff_mode and base is not None:
         base_sql = base.compiled_code  # baseline: manifest only, no target dir
@@ -115,14 +121,14 @@ def _estimate_one(
             # right answer either way: with no baseline bytes the delta maths read
             # the model as new, so the whole current scan looks like an increase,
             # and a threshold firing on that is firing on a missing measurement.
-            est.gateable = False
+            est.skip_reason = SkipReason.NO_BASELINE_SQL
 
     if est.basis_mismatch:
         est.warnings.append(
             f"mixed basis — baseline is {est.basis_baseline.value}, current is "
             f"{est.basis_current.value}; recompile the baseline the same way"
         )
-        est.gateable = False
+        est.skip_reason = SkipReason.BASIS_MISMATCH
 
     return est
 
@@ -142,14 +148,20 @@ def build_deltas(
         if est.bytes_baseline is not None:
             usd_baseline, _ = table.usd(est.bytes_baseline, region_hint)
 
-        gateable = est.gateable
+        # A user's exclusion overrides whatever else stopped this model being
+        # gated, and that is what makes `exclude:` a working escape hatch: a
+        # model whose dry-run always fails can be accepted by name instead of
+        # failing every run.
+        skip_reason = est.skip_reason
         warnings = list(est.warnings)
         if est.name in config.exclude:
-            gateable = False
+            skip_reason = SkipReason.EXCLUDED
             warnings.append("excluded from gating by config")
         elif est.name in config.warn_only:
-            gateable = False
+            skip_reason = SkipReason.WARN_ONLY
             warnings.append("warn-only by config")
+        elif skip_reason is None and est.bytes_current is None:
+            skip_reason = SkipReason.DRY_RUN_FAILED
 
         error = None
         if est.bytes_current is None:
@@ -162,7 +174,8 @@ def build_deltas(
                 is_incremental=est.is_incremental,
                 is_new=est.is_new,
                 basis=est.basis_current,
-                gateable=gateable and est.bytes_current is not None,
+                gateable=skip_reason is None,
+                skip_reason=skip_reason,
                 bytes_baseline=est.bytes_baseline,
                 bytes_current=est.bytes_current,
                 usd_baseline=usd_baseline,
