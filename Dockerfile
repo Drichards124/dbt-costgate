@@ -12,13 +12,13 @@
 
 # Build the wheel in a stage that is thrown away, so no build tooling and no
 # source tree reaches the published image.
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 WORKDIR /src
 RUN pip install --no-cache-dir build
 COPY . .
 RUN python -m build --wheel --outdir /dist
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.title="dbt-costgate" \
       org.opencontainers.image.description="BigQuery cost gate for dbt pull requests." \
