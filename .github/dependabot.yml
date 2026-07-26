@@ -17,3 +17,13 @@ updates:
     schedule:
       interval: "weekly"
     labels: ["dependencies", "ci"]
+
+  # The container image's base is a dependency like any other, and it is the one
+  # nobody thinks to look at. Without this it would be the only dependency here
+  # that nothing watches.
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "ple"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]

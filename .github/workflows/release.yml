@@ -135,3 +135,48 @@ jobs:
             echo ""
             echo "The **Marketplace drift** workflow fails every Monday until this is done."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishing the container image is off until the repository variable
+  # PUBLISH_IMAGE is set to "true". The image itself is built and smoke-tested on
+  # every push to `ple`, so this switch governs only whether a release pushes it
+  # to ghcr.io — turning it on is a deliberate decision, not something a tag
+  # does by surprise. Note that a job-level permissions block replaces the
+  # workflow default, so this job deliberately has no `contents: write`.
+  image:
+    name: Publish the container image
+    needs: release
+    if: vars.PUBLISH_IMAGE == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # to check out the source the image is built from
+      packages: write # to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image for this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker build \
+            --label org.opencontainers.image.version="$version" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            -t "$image:$GITHUB_REF_NAME" -t "$image:latest" .
+
+      - name: The image must report the version being released
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          got="$(docker run --rm "$IMAGE:$GITHUB_REF_NAME" --version)"
+          if [ "$got" != "dbt-costgate $version" ]; then
+            echo "Image reports '$got', this release is $version — refusing to push."
+            exit 1
+          fi
+
+      - name: Push to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          docker push "$IMAGE:$GITHUB_REF_NAME"
+          docker push "$IMAGE:latest"

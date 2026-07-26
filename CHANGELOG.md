@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A `Dockerfile`**, so CI that isn't GitHub Actions can run the same check
+  without a Python environment of its own:
+
+  ```bash
+  docker build -t dbt-costgate .
+  docker run --rm -v "$PWD:/workspace" dbt-costgate check
+  ```
+
+  The image runs as a non-root user, mounts your project at `/workspace`, and
+  contains dbt-costgate only — not dbt, so compile in the image you already use
+  for that and hand this one the `target/`. The
+  [usage guide](https://github.com/Drichards124/dbt-costgate/blob/main/docs/usage.md#docker-and-ci-that-isnt-github-actions)
+  has a GitLab pipeline that authenticates keylessly, with no service-account key
+  anywhere. A published image on `ghcr.io` is wired but not switched on yet;
+  build it yourself or push it to your own registry until it lands.
+
 - **A `pre-commit` hook**, id `dbt-costgate`. If your team runs
   [pre-commit](https://pre-commit.com), adding this repository to your
   `.pre-commit-config.yaml` catches an expensive change on your own machine
