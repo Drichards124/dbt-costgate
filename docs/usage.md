@@ -443,6 +443,53 @@ dbt artifacts. It runs `check --format markdown`; every `check` flag is an input
 Outputs: `exit-code` (0/1/2) and `status` (`ok`/`failed`/`error`). The exact
 PASS/WARN/FAIL verdict is in the comment body.
 
+## Pre-commit hook
+
+If your team already runs [pre-commit](https://pre-commit.com), dbt-costgate ships a
+hook. It catches an expensive change on your own machine, before the push that
+turns it into someone else's review problem.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/Drichards124/dbt-costgate
+    rev: v0.8.0
+    hooks:
+      - id: dbt-costgate
+```
+
+```bash
+pre-commit install --hook-type pre-push
+```
+
+That second flag matters: the hook runs at **pre-push**, not pre-commit, and
+`pre-commit install` on its own only installs the pre-commit stage — the hook
+would sit there and never fire. Pre-push is deliberate. The check needs a
+compiled target and a BigQuery round-trip per changed model, and a hook that
+slow on every commit is a hook people turn off. It runs when any `.sql`, `.yml`
+or `.yaml` file is on its way out.
+
+**It needs the same two things the CLI does**: compiled artifacts in `target/`
+(run `dbt compile` first) and BigQuery access via ADC. If either is missing the
+check exits 2 and the push stops. When you know that's what happened, push past
+it with `SKIP=dbt-costgate git push`.
+
+Everything `check` takes is available through `args`:
+
+```yaml
+      - id: dbt-costgate
+        args: [--project-dir, analytics, --max-usd-total, "20", --max-tib-total, "3"]
+```
+
+Two notes on what the hook environment is. pre-commit builds it in isolation and
+installs dbt-costgate into it — it does **not** contain your dbt, so
+`--against <ref>` (which shells out to `dbt`) works only if `dbt` is a real
+executable on `PATH`, not a shell alias. And hooks run from the repository root,
+so a dbt project in a subdirectory needs `--project-dir`, as above.
+
+The absolute ceilings are what make this useful without a baseline — see
+[Gate locally with absolute ceilings](#gate-locally-with-absolute-ceilings).
+
 ## Incremental models
 
 Incrementals are first-class. Compiled in a fresh target, `is_incremental()` is

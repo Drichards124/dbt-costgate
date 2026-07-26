@@ -97,6 +97,12 @@ The local mode still gates, using absolute ceilings that need no baseline —
 `--max-usd-total` and `--max-tib-total` cap a single model's total, rather than
 its increase.
 
+**On your own machine, automatically.** If your team uses pre-commit, there's a
+hook. It runs the local check when you *push* — not on every commit, which would
+mean waiting on BigQuery all day — so an expensive change gets caught before it
+becomes anyone else's review. See the
+[usage guide](usage.md#pre-commit-hook).
+
 There is also a middle option, `dbt-costgate check --against main`, which produces
 the baseline for you by checking `main` out into a throwaway git worktree and
 compiling it there. Two things to know about it: it reuses your already-installed
