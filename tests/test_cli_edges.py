@@ -331,3 +331,57 @@ def test_the_net_line_excludes_a_basis_mismatched_model(tmp_path: Path, capsys):
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["net"]["bytes"] is None, "a saving cannot be netted from an invalid comparison"
+
+
+def test_excluding_a_model_does_not_put_its_invalid_comparison_back_in_the_net(
+    tmp_path: Path, capsys
+):
+    """`exclude:` is the escape hatch for a model the gate cannot check, so it
+    has to override the skip reason. It must not also override the fact that the
+    two figures were compiled differently — otherwise silencing the gate for one
+    model quietly restores the headline this was added to stop, on the same run
+    that prints "recompile the baseline the same way"."""
+    target = write_target(
+        tmp_path,
+        make_manifest(
+            make_node(
+                "fct_orders",
+                materialized="incremental",
+                compiled_code=f"select * from src where ts > (select max(ts) from {SELF_RELATION})",
+                checksum="new",
+            )
+        ),
+    )
+    baseline = _baseline(
+        tmp_path,
+        make_node(
+            "fct_orders",
+            materialized="incremental",
+            compiled_code="select * from src",
+            checksum="old",
+        ),
+    )
+    (tmp_path / ".dbt-costgate.yml").write_text("exclude:\n  - fct_orders\n", "utf-8")
+    runner = FakeDryRunner(
+        {"max(ts)": DryRunResult(total_bytes=TIB, location="US"), "select * from src": 9 * TIB}
+    )
+    code = main(
+        [
+            "check",
+            "--current",
+            str(target),
+            "--baseline",
+            str(baseline),
+            "--config",
+            str(tmp_path / ".dbt-costgate.yml"),
+            "--format",
+            "json",
+            "--max-pct",
+            "1",
+        ],
+        runner=runner,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, "the exclusion still has to stop the gate failing"
+    assert payload["models"][0]["skip_reason"] == "excluded"
+    assert payload["net"]["bytes"] is None, "still an invalid comparison, exclusion or not"

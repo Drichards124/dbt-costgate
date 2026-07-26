@@ -187,6 +187,9 @@ def build_deltas(
         # model whose dry-run always fails can be accepted by name instead of
         # failing every run.
         skip_reason = est.skip_reason
+        # Read before the override below, because the override is about gating
+        # and this is about whether the subtraction means anything.
+        comparable = est.skip_reason is not SkipReason.BASIS_MISMATCH
         warnings = list(est.warnings)
         if est.name in config.exclude:
             skip_reason = SkipReason.EXCLUDED
@@ -211,6 +214,7 @@ def build_deltas(
                 basis=est.basis_current,
                 gateable=skip_reason is None,
                 skip_reason=skip_reason,
+                comparable=comparable,
                 bytes_baseline=est.bytes_baseline,
                 bytes_current=est.bytes_current,
                 usd_baseline=usd_baseline,

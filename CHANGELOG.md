@@ -145,7 +145,9 @@ could not check a model now fails instead of passing, and that is deliberate.
 
 - **The net line no longer totals a comparison the report just called invalid.**
   Having warned that a model's two figures cannot be subtracted, it went on to
-  headline the subtraction.
+  headline the subtraction. Naming that model in `exclude:` does not bring the
+  total back either — an exclusion says "do not fail the build over this", not
+  "the two figures are comparable after all".
 
 - **A permanent SQL error is no longer reported as a transient one.** The status
   code was matched anywhere in the message, so `400 Syntax error … at [500:3]`

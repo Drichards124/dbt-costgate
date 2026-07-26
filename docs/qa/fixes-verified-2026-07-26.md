@@ -65,9 +65,50 @@ basis-mismatch case quietly became a no-op — a harness bug that reads exactly
 like a passing product. Both halves have to move together. Worth recording
 because the same trap is available to anyone rebuilding this rig.
 
+## The second pass — the whole walkthrough, not just the defects
+
+The table above re-ran the fourteen cases that had been *defects*. That leaves
+the other ninety-odd commands of the original walkthrough — the ones that were
+already fine — unaccounted for, and those are exactly where a regression would
+hide. So the walkthrough was driven again end to end: 94 commands, all three
+exit codes, every scenario file in the rig.
+
+Everything that worked before still works. Two things did not, and both are in
+code these fixes introduced:
+
+- **`exclude:` handed an invalid comparison back to the headline.** `exclude:`
+  has to overwrite the skip reason — that is what makes it the escape hatch for
+  a model the gate cannot check. It was overwriting `basis_mismatch` too, and
+  the net total was reading the skip reason to decide what it could add up. So
+  the same report that said "their two figures answer different questions" then
+  printed `Net increase: USD 13.19/run` — F6 again, through a different door,
+  and only for someone who had reached for the escape hatch. Comparability is
+  now its own flag, set before the exclusion is applied.
+
+- **A plural count met a singular pronoun.** The run-level breach reuses the
+  per-model reason text, and one of those reasons began "its dry-run…", giving
+  `none of the 2 selected models could be gated — its dry-run did not return a
+  size`. The reasons are now written without a pronoun so they read in both
+  frames.
+
+Both are fixed, tested and re-checked against a rebuilt wheel.
+
+Two cases the *harness* failed to reach on the first attempt, worth writing down
+because neither failure looked like a failure: a `git checkout` was blocked by
+dbt's own untracked `.user.yml`, so the materialized-view branch silently stayed
+on the previous branch and reported "no such model"; and a `baselines:` entry
+written as a bare path instead of `manifest:` was correctly rejected, which meant
+the named-baseline happy path never ran. Both were re-run afterwards and pass.
+
 ## Still not proved
 
 Unchanged from the first pass: everything except the network was real, and the
 network is the one thing a stand-in cannot vouch for. Whether BigQuery's actual
 responses match the fake's shape, and whether the retry predicate fires on
 genuine 429/503s, needs one run against a real project before calling this 1.0.
+
+One narrower caveat from the second pass: `--against <ref>` compiles the ref with
+the project's own adapter, which in this rig is duckdb, so the baseline it
+produces is not shaped like the branch and the run reports a basis mismatch.
+That is the harness, not the tool — but it is also a fair demonstration that the
+mismatch is no longer something the gate stays quiet about.

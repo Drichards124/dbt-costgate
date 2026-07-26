@@ -108,16 +108,19 @@ class SkipReason(str, Enum):
 
 # What a report says about a model the gate could not check. Plain language, and
 # each one ends in the thing the reader can do about it.
+#
+# Written without a pronoun for the model, because each of these is used in two
+# frames: after one model's name ("fct_orders_daily: not checked — …") and after
+# a count ("none of the 2 selected models could be gated — …"). "its dry-run"
+# reads correctly in the first and disagrees with the plural in the second.
 SKIP_REASON_MESSAGES: dict[SkipReason, str] = {
-    SkipReason.NO_COMPILED_SQL: (
-        "there is no compiled SQL for it, so nothing could be measured — run `dbt compile`"
-    ),
+    SkipReason.NO_COMPILED_SQL: "there is no compiled SQL to measure — run `dbt compile`",
     SkipReason.DRY_RUN_FAILED: (
-        "its dry-run did not return a size, so there is no figure to compare against a threshold"
+        "the dry-run did not return a size, so there is no figure to compare against a threshold"
     ),
     SkipReason.NO_BASELINE_SQL: (
-        "the baseline has no compiled SQL for it, so there is nothing to compare against — "
-        "the baseline must come from `dbt compile`, not `dbt parse`"
+        "the baseline has no compiled SQL to compare against — it must come from "
+        "`dbt compile`, not `dbt parse`"
     ),
     SkipReason.BASIS_MISMATCH: (
         "the baseline and this branch were compiled differently, so their two figures answer "
@@ -306,6 +309,13 @@ class CostDelta:
     # In the baseline and gone from the branch. `bytes_current` is 0, so the
     # delta is the whole of what it used to scan — a saving.
     is_deleted: bool = False
+    # Whether the two figures can be subtracted at all. Separate from
+    # `skip_reason` because `exclude:` overwrites that one, and it must: a model
+    # whose dry-run always fails has to be acceptable by name. But excluding a
+    # model from *gating* says nothing about whether its baseline and branch were
+    # compiled the same way, and letting the exclusion answer that question put
+    # the incomparable figure straight back into the headline net.
+    comparable: bool = True
 
     @property
     def unchecked(self) -> bool:
@@ -429,12 +439,12 @@ class Report:
         mismatch says the two numbers cannot be subtracted at all — and having
         printed exactly that warning, the report went on to headline `Net saving:
         USD 4.31/run`, a single incremental run taken off a full rebuild.
+
+        Read off `comparable`, not `skip_reason`, because `exclude:` overwrites
+        the reason — so asking the reason let a user who silenced the gate for
+        one model put that model's incomparable figure back in the total.
         """
-        return [
-            d
-            for d in self.deltas
-            if d.bytes_delta is not None and d.skip_reason is not SkipReason.BASIS_MISMATCH
-        ]
+        return [d for d in self.deltas if d.bytes_delta is not None and d.comparable]
 
     @property
     def net_bytes(self) -> int | None:
