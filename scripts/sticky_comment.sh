@@ -32,7 +32,13 @@ else
 fi
 if [ "$(wc -c <"$send")" -gt "$MAX" ]; then
   trunc="$(mktemp)"
-  head -c $((MAX - 64)) "$send" >"$trunc"
+  # Cut on bytes (conservative — the limit is in characters), then drop the final
+  # line, which that cut may have left partial. Reports carry multi-byte
+  # characters, and half of one is invalid UTF-8 that the API rejects. Dropping a
+  # whole line cannot land inside a character, and needs nothing but coreutils —
+  # `iconv -c` exits nonzero on a trailing incomplete sequence, which under
+  # `set -euo pipefail` would abort the upsert instead of shortening it.
+  head -c $((MAX - 64)) "$send" | sed '$d' >"$trunc"
   printf '\n\n_…report truncated._\n' >>"$trunc"
   mv "$trunc" "$send"
 fi
@@ -40,9 +46,11 @@ fi
 # Find dbt-costgate's existing sticky, if any. --paginate evaluates --jq per page, so
 # a match on a later page (or a stray duplicate) can emit several ids; take the
 # first. pipefail is relaxed here so head closing the pipe early is not an error.
+# The marker reaches jq through the environment rather than being spliced into
+# the filter text, so a marker containing quotes cannot rewrite the program.
 set +o pipefail
-id="$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
-  --jq '.[] | select(.body | contains("'"$MARKER"'")) | .id' 2>/dev/null |
+id="$(MARKER="$MARKER" gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+  --jq '.[] | select(.body | contains(env.MARKER)) | .id' 2>/dev/null |
   head -n 1 | tr -d '[:space:]')"
 set -o pipefail
 

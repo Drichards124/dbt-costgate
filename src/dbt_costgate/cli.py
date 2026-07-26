@@ -175,6 +175,21 @@ def _aggregate_source(sources: set[str]) -> str:
     return " + ".join(present) or "built-in table"
 
 
+def _log_error_details(estimates) -> None:
+    """Print BigQuery's own message for each failed model — to stderr only.
+
+    Reports name the failure by kind and stop there, because they become
+    pull-request comments and BigQuery quotes the query it was given (SECURITY.md).
+    stderr is the job log: same information, an access-controlled place to put it.
+    """
+    for est in estimates:
+        if est.error_kind is not None and est.error_detail:
+            print(
+                f"dbt-costgate: {est.name}: {est.error_kind.value}: {est.error_detail}",
+                file=sys.stderr,
+            )
+
+
 def _build_disclosure(table: PricingTable, deltas) -> PricingDisclosure:
     regions: dict[str, float] = {}
     region_sources: dict[str, str] = {}
@@ -371,6 +386,8 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         renames=renames,
         indirect=indirect,
     )
+
+    _log_error_details(estimates)
 
     if selected and estimate.has_only_operational_failures(estimates):
         print(
