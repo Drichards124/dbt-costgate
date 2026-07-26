@@ -490,6 +490,76 @@ so a dbt project in a subdirectory needs `--project-dir`, as above.
 The absolute ceilings are what make this useful without a baseline — see
 [Gate locally with absolute ceilings](#gate-locally-with-absolute-ceilings).
 
+## Docker (and CI that isn't GitHub Actions)
+
+The repository ships a `Dockerfile`, so teams on GitLab CI, Buildkite, Jenkins or
+anything else can run the same check without a Python environment of their own.
+
+```bash
+docker build -t dbt-costgate .
+docker run --rm -v "$PWD:/workspace" dbt-costgate check
+```
+
+> A published image on `ghcr.io` is wired up but **not switched on yet** — build
+> it yourself, or push it to your own registry, until it lands.
+
+The image contains dbt-costgate and nothing else. It does **not** contain dbt: it
+estimates cost, it doesn't build your project, so compile in whatever image you
+already use for dbt and hand the resulting `target/` to this one. It runs as a
+non-root user and its working directory is `/workspace`, where you mount the
+project. If your project files are owned by a different uid on the host, add
+`--user "$(id -u):$(id -g)"` — the check only reads.
+
+**Credentials, locally.** Same ADC as everywhere else, mounted read-only:
+
+```bash
+docker run --rm \
+  -v "$PWD:/workspace" \
+  -v "$HOME/.config/gcloud:/home/costgate/.config/gcloud:ro" \
+  dbt-costgate check --max-usd-total 20
+```
+
+**Credentials, in CI: keyless.** Do not mount a service-account key file into
+this container. Use workload identity federation — the Google client libraries
+inside the image read a *credential configuration file* exactly the way they read
+any other ADC file, and that file holds no secret: it points at a short-lived
+token your CI mints per job. Generate it once with
+`gcloud iam workload-identity-pools create-cred-config` and commit it.
+
+A GitLab pipeline, with the compile and the check split across the two images
+that can each do their half:
+
+```yaml
+compile:
+  stage: build
+  image: your-dbt-image:latest
+  script:
+    - dbt compile
+  artifacts:
+    paths: [target/]
+
+cost-gate:
+  stage: test
+  needs: [compile]
+  image:
+    name: your-registry/dbt-costgate:latest
+    entrypoint: [""] # GitLab runs its own `script`, so bypass the ENTRYPOINT
+  id_tokens:
+    GCP_ID_TOKEN:
+      aud: //iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+  variables:
+    # The credential config generated above; `credential_source.file` in it
+    # points at the token written below. No key material anywhere.
+    GOOGLE_APPLICATION_CREDENTIALS: ci/gcp-credential-config.json
+  script:
+    - echo "$GCP_ID_TOKEN" > /tmp/gcp-oidc-token
+    - dbt-costgate check --baseline baseline/manifest.json --fail-on fail
+```
+
+The exit code is the gate: `0` pass, `1` a threshold was breached, `2` the tool
+could not complete. That is the whole integration — there is no GitLab-specific
+code path.
+
 ## Incremental models
 
 Incrementals are first-class. Compiled in a fresh target, `is_incremental()` is
