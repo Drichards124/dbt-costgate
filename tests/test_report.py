@@ -5,13 +5,18 @@ import pytest
 
 from dbt_costgate import report
 from dbt_costgate.models import (
+    BASIS_LABELS,
     CostDelta,
+    EstimateBasis,
     Notice,
     PricingDisclosure,
     Report,
     Status,
     Verdict,
 )
+
+_FULL_REFRESH = BASIS_LABELS[EstimateBasis.FULL_REFRESH]
+_INCREMENTAL_FORM = BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM]
 
 
 def _report(mode="diff", status=Status.FAIL):
@@ -20,6 +25,7 @@ def _report(mode="diff", status=Status.FAIL):
             name="fct_orders_daily",
             unique_id="model.pkg.fct_orders_daily",
             is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
             is_new=False,
             gateable=True,
             bytes_baseline=71_000_000,
@@ -27,13 +33,14 @@ def _report(mode="diff", status=Status.FAIL):
             usd_baseline=0.0004,
             usd_current=18.19,
             region="US",
-            warnings=["incremental — figure is the full-refresh scan"],
+            warnings=[BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning],
             runs_per_month=30,
         ),
         CostDelta(
             name="inc_missing",
             unique_id="model.pkg.inc_missing",
             is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
             is_new=False,
             gateable=False,
             bytes_baseline=None,
@@ -405,9 +412,12 @@ def test_notices_render_in_every_format_and_sit_with_the_disclosure():
 def test_absent_notices_add_nothing():
     rep = _report()
     assert rep.notices == []
-    assert "⚠" not in report.render_terminal(rep).replace(
-        "⚠ incremental — figure is the full-refresh scan", ""
-    )
+    # The fixture's incremental model still warns, now as the collapsed footnote.
+    # Asserted as the complete list of ⚠ lines rather than by stripping known
+    # text: a reworded footnote fails here loudly instead of quietly leaving an
+    # assertion that matches nothing.
+    warned = [line for line in report.render_terminal(rep).splitlines() if "⚠" in line]
+    assert warned == [f"  ⚠ {_FULL_REFRESH.footnote}"]
     assert json.loads(report.render_json(rep))["notices"] == []
 
 
@@ -423,3 +433,241 @@ def test_a_notice_is_not_confusable_with_a_gate_breach():
     md = report.render_markdown(rep)
     assert "✅ **Gate: PASS**" in md
     assert f"\n- {_NOTICE.message}" not in md
+
+
+def _md_footer(out: str) -> list[str]:
+    return out.rsplit("<sub>", 1)[1].split("</sub>")[0].split("<br/>")
+
+
+def test_a_priced_footer_discloses_the_free_tier_it_does_not_deduct():
+    """The one adjustment that separates these figures from the same bytes on an
+    invoice, and it is not applied. It belongs beside the figure rather than only
+    in the docs — a reader comparing a report against a bill has the report in
+    front of them and the docs somewhere else."""
+    for out in (report.render_terminal(_report()), report.render_markdown(_report())):
+        assert "free tier" in out
+        assert "never deducted" in out
+
+
+def test_the_footer_stays_on_the_meter_the_report_is_about():
+    """Every figure here prices bytes scanned, which is compute. Storage is a
+    separate BigQuery meter that this tool does not price at all — a scope
+    boundary, documented as a non-goal, and not an adjustment pending on a compute
+    number. Naming it under one would imply the report had weighed it and found it
+    zero, and would invite the same disclaimer for every other meter dbt-costgate
+    is equally not about.
+    """
+    for out in (report.render_terminal(_report()), report.render_markdown(_report())):
+        assert "storage" not in out.lower()
+
+
+def test_an_unpriced_footer_claims_no_adjustment_to_a_price_it_never_quoted():
+    """Under slots the report quotes no money at all, so "the free tier is not
+    deducted" would describe arithmetic that did not happen — and the free tier is
+    an on-demand allowance that does not apply to capacity pricing anyway. The
+    unpriced disclosure already says the report measures scanned bytes only, which
+    is the same statement for a report with no money in it."""
+    for out in (
+        report.render_terminal(_unpriced_report()),
+        report.render_markdown(_unpriced_report()),
+    ):
+        assert "free tier" not in out
+        assert "measures scanned bytes only" in out
+
+
+def test_both_renderers_carry_the_same_footer_notes():
+    """The free-tier note is conditional, and the terminal and markdown footers
+    are assembled separately. Left unchecked, one renderer keeps a note the other
+    drops and the same run discloses different things depending on where it is
+    read. Compared as a whole list so an added note is covered without anyone
+    remembering to extend this test."""
+    for rep in (_report(), _unpriced_report()):
+        terminal = [
+            line.strip() for line in report.render_terminal(rep).split("\n") if line.strip()
+        ]
+        markdown = _md_footer(report.render_markdown(rep))
+        assert terminal[-len(markdown) :] == markdown
+
+
+def _incrementals(n: int) -> Report:
+    """n incremental models, every one of them carrying the warning."""
+    deltas = [
+        CostDelta(
+            name=f"fct_{i}",
+            unique_id=f"model.pkg.fct_{i}",
+            is_incremental=True,
+            basis=EstimateBasis.FULL_REFRESH,
+            is_new=False,
+            gateable=True,
+            bytes_baseline=1_000_000,
+            bytes_current=2_000_000,
+            usd_baseline=0.01,
+            usd_current=0.02,
+            region="US",
+            warnings=[BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning],
+        )
+        for i in range(n)
+    ]
+    return Report(
+        deltas=deltas,
+        disclosure=PricingDisclosure(
+            regions={"US": 6.25},
+            source="built-in table",
+            table_version="2026.07",
+            last_verified="2026-07-23",
+        ),
+        verdict=Verdict(status=Status.PASS, breaches=[], exit_code=0),
+        mode="diff",
+    )
+
+
+def test_the_incremental_warning_is_said_once_however_many_rows_carry_it():
+    """It explains what the `full-refresh` tag means, which is the same sentence
+    for every row that has one. Repeated per model it grew with the number of
+    incrementals in the change and pushed the caveats that are about a specific
+    model — a dynamic filter, a missing baseline — under a wall of repeats.
+
+    Both halves are asserted. Counting the footnote alone proves nothing: it is
+    worded differently from the warning it replaces, so it stays at one whether or
+    not the per-row repeats came back beneath it.
+    """
+    for render in (report.render_terminal, report.render_markdown):
+        out = render(_incrementals(4))
+        assert out.count(_FULL_REFRESH.footnote) == 1
+        assert _FULL_REFRESH.warning not in out
+
+
+def test_every_incremental_row_keeps_its_own_tag():
+    """The footnote replaces the repeated sentence, not the per-row marking. A
+    reader still has to be able to tell *which* rows it is talking about, so
+    collapsing the prose while also dropping the tag would leave the footnote
+    referring to nothing."""
+    rep = _incrementals(4)
+    terminal = report.render_terminal(rep)
+    assert terminal.count("(full-refresh)") == 4
+    assert report.render_markdown(rep).count("_full-refresh_") == 4
+
+
+def test_a_models_own_warnings_still_render_on_its_row():
+    """Only the shared one collapses. A caveat that applies to one model is the
+    reason the warning list exists, and must not be swept into the footnote."""
+    rep = _incrementals(2)
+    rep.deltas[0].warnings.append("dynamic filter — dry-run may be worst-case (overestimate)")
+    assert "  fct_0" in report.render_terminal(rep)
+    assert "      ⚠ dynamic filter" in report.render_terminal(rep)
+    assert "> ⚠ **fct_0** — dynamic filter" in report.render_markdown(rep)
+
+
+def test_no_footnote_when_no_row_carries_the_warning():
+    rep = _incrementals(1)
+    rep.deltas[0].warnings = []
+    for render in (report.render_terminal, report.render_markdown):
+        assert _FULL_REFRESH.footnote not in render(rep)
+
+
+def test_the_footnote_follows_the_warning_and_not_the_tag():
+    """The two conditions look interchangeable and are not: `sql_warnings`
+    returns nothing at all for a model with no compiled SQL, so a row can be
+    incremental — and tagged — while never having carried the warning. Keyed on
+    the tag, the footnote would speak for rows the per-row lines never covered,
+    which is a claim about a figure that was never measured."""
+    rep = _incrementals(1)
+    rep.deltas[0].warnings = []
+    assert rep.deltas[0].is_incremental
+    terminal = report.render_terminal(rep)
+    assert "(full-refresh)" in terminal
+    assert _FULL_REFRESH.footnote not in terminal
+
+
+def _basis_row(name: str, basis: EstimateBasis) -> CostDelta:
+    return CostDelta(
+        name=name,
+        unique_id=f"model.pkg.{name}",
+        is_incremental=True,
+        basis=basis,
+        is_new=False,
+        gateable=True,
+        bytes_baseline=1_000_000,
+        bytes_current=2_000_000,
+        usd_baseline=0.01,
+        usd_current=0.02,
+        region="US",
+        warnings=[BASIS_LABELS[basis].warning],
+    )
+
+
+def _basis_report(*bases: EstimateBasis) -> Report:
+    return Report(
+        deltas=[_basis_row(f"m{i}", b) for i, b in enumerate(bases)],
+        disclosure=PricingDisclosure(
+            regions={"US": 6.25},
+            source="built-in table",
+            table_version="2026.07",
+            last_verified="2026-07-23",
+        ),
+        verdict=Verdict(status=Status.PASS, breaches=[], exit_code=0),
+        mode="diff",
+    )
+
+
+def test_an_incremental_form_row_is_not_labelled_a_rebuild():
+    """The defect this exists to prevent. The model is incremental either way, so
+    a tag derived from `is_incremental` called both rows `full-refresh` — telling
+    a reader the figure was a rebuild when the dry-run measured a single run
+    against the table as already built. On a large fact table those differ by
+    orders of magnitude, and the wrong one reads low."""
+    rep = _basis_report(EstimateBasis.INCREMENTAL_FORM)
+    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+        assert _INCREMENTAL_FORM.tag in out
+        assert _FULL_REFRESH.tag not in out
+        assert _FULL_REFRESH.footnote not in out
+
+
+def test_the_tag_follows_the_basis_and_not_is_incremental():
+    """Stated directly, because the two agree on every row except the one that
+    matters. `is_incremental` is a fact about the model; the basis is a fact about
+    the number printed beside it, and only the second can label that number."""
+    rep = _basis_report(EstimateBasis.INCREMENTAL_FORM)
+    assert rep.deltas[0].is_incremental
+    assert report._row_tag(rep.deltas[0]) == _INCREMENTAL_FORM.tag
+
+
+def test_a_row_with_an_unknown_basis_is_left_unlabelled():
+    """No basis means nothing was established about the shape that was measured.
+    Falling back to a tag would be a guess printed as a fact; an absent tag is
+    merely silent."""
+    rep = _basis_report(EstimateBasis.FULL_REFRESH)
+    # Both come from the same `detect_basis` call in the pipeline, so an unknown
+    # basis means an unknown basis warning too. Clearing one and not the other
+    # would build a state the estimator cannot produce.
+    rep.deltas[0].basis = None
+    rep.deltas[0].warnings = []
+    assert report._row_tag(rep.deltas[0]) is None
+    assert _FULL_REFRESH.tag not in report.render_terminal(rep)
+
+
+def test_a_report_mixing_bases_explains_both_tags():
+    """A change can touch one model compiled fresh and another compiled against
+    its table. Printing a single footnote would leave one of the two tags on the
+    page with nothing saying what it means — and the reader with no way to know
+    which figure they are looking at."""
+    rep = _basis_report(EstimateBasis.FULL_REFRESH, EstimateBasis.INCREMENTAL_FORM)
+    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+        assert out.count(_FULL_REFRESH.footnote) == 1
+        assert out.count(_INCREMENTAL_FORM.footnote) == 1
+        assert _FULL_REFRESH.tag in out and _INCREMENTAL_FORM.tag in out
+        # still collapsed: neither per-model warning survives beside its row
+        assert _FULL_REFRESH.warning not in out
+        assert _INCREMENTAL_FORM.warning not in out
+
+
+def test_json_states_which_basis_was_measured():
+    """`is_incremental` was already there and cannot answer this: it is true for
+    both shapes. A consumer gating on rebuild cost needs to know which figure it
+    received, so the basis is exposed rather than left to be inferred."""
+    payload = json.loads(report.render_json(_basis_report(EstimateBasis.INCREMENTAL_FORM)))
+    assert payload["models"][0]["basis"] == "incremental_form"
+    assert payload["models"][0]["is_incremental"] is True
+    unknown = _basis_report(EstimateBasis.FULL_REFRESH)
+    unknown.deltas[0].basis = None
+    assert json.loads(report.render_json(unknown))["models"][0]["basis"] is None

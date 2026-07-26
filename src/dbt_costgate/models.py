@@ -130,6 +130,48 @@ class ModelEstimate:
         )
 
 
+@dataclass(frozen=True)
+class BasisLabel:
+    """Everything a reader is told about one estimate basis, in one place.
+
+    A basis surfaces in three forms that must agree: a tag on the row, a warning
+    on the model, and the footnote a report prints once instead of repeating the
+    warning. Split across the modules that render them, they drifted — the tag
+    and the warning were each derived from `is_incremental` alone, so a model
+    compiled in incremental form was tagged `full-refresh` and told its figure
+    was a rebuild, which was simply untrue.
+
+    One entry per basis, so a new one cannot be added while quietly leaving a
+    renderer to guess. `EstimateBasis.DIRECT` is deliberately absent: a table or
+    a view compiles one way, so there is no basis to disambiguate and nothing to
+    say. Absence from this mapping is what "needs no label" means.
+    """
+
+    tag: str  # the per-row marker
+    warning: str  # the per-model warning `artifacts.sql_warnings` emits
+    footnote: str  # the collapsed explanation a report prints once
+
+
+BASIS_LABELS: dict[EstimateBasis, BasisLabel] = {
+    EstimateBasis.FULL_REFRESH: BasisLabel(
+        tag="full-refresh",
+        warning="incremental — figure is the full-refresh scan",
+        footnote=(
+            "full-refresh — for the rows tagged above, the figure is the cost of "
+            "rebuilding the table, not of one incremental run."
+        ),
+    ),
+    EstimateBasis.INCREMENTAL_FORM: BasisLabel(
+        tag="incremental",
+        warning="incremental — figure is one incremental run, not a rebuild",
+        footnote=(
+            "incremental — for the rows tagged above, the figure is one run against "
+            "the table as already built, so it does not gate rebuild cost."
+        ),
+    ),
+}
+
+
 @dataclass
 class CostDelta:
     """A priced estimate: the numbers a report renders and the gate evaluates."""
@@ -147,6 +189,12 @@ class CostDelta:
     warnings: list[str] = field(default_factory=list)
     error: str | None = None  # human-readable "not estimated" reason
     runs_per_month: int | None = None
+    # How this model's bytes were measured. `is_incremental` says the model *is*
+    # incremental; this says which shape was actually dry-run, which is what
+    # decides whether the figure is a rebuild or a single run. Defaulted so a
+    # hand-built delta stays constructible, and so an unknown basis leaves a row
+    # unlabelled rather than mislabelled.
+    basis: EstimateBasis | None = None
 
     @property
     def bytes_delta(self) -> int | None:

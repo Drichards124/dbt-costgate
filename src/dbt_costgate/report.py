@@ -9,9 +9,38 @@ from __future__ import annotations
 
 import json
 
-from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status, format_money
+from dbt_costgate.models import (
+    BASIS_LABELS,
+    CostDelta,
+    PricingDisclosure,
+    Report,
+    Status,
+    format_money,
+)
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
+
+# The one thing that makes a figure here differ from the same bytes on an
+# invoice. Stated rather than subtracted: the allowance belongs to the whole
+# billing account, which dbt-costgate has no way to see, so deducting it would
+# mean guessing. Over-reporting is the safe direction for a gate —
+# under-reporting is what lets a regression through.
+#
+# Scoped to compute on purpose. Every figure in this report is a price for bytes
+# scanned, and this names the one adjustment that applies to those bytes and is
+# not made. Storage is a different meter with its own rate and its own free
+# allowance; dbt-costgate does not price it, but that is the tool's scope rather
+# than a caveat on this number, and the footer under a compute figure is not
+# where a reader is owed the boundaries of the product.
+#
+# A footer line and not a `notices.py` entry, either: a notice describes
+# configuration that cannot do what it looks like it does, so it is conditional
+# and silenceable, while this is true of every priced report — and a notice that
+# always fires is noise rather than signal.
+_FREE_TIER_NOTE = (
+    "Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free "
+    "tier is per billing account, so it is disclosed here and never deducted."
+)
 
 
 def humanize_bytes(n: int | None) -> str:
@@ -65,6 +94,67 @@ def _disclosure_line(d: PricingDisclosure) -> str:
         parts.append(token)
     regions = " · ".join(parts) or "—"
     return f"Pricing: {regions} · {d.source} (table {d.table_version}, verified {d.last_verified})"
+
+
+def _footer_notes(d: PricingDisclosure) -> list[str]:
+    """The footer every renderer ends with, in order.
+
+    Built here rather than in each renderer so terminal and markdown cannot come
+    to disagree about which notes apply — the free-tier line is conditional, and
+    a condition written twice is a condition that eventually differs.
+
+    The unpriced footer omits it. The free tier is an on-demand allowance that
+    does not apply to capacity/Editions pricing at all, and a report quoting no
+    money has no figure for it to adjust.
+    """
+    notes = [_disclosure_line(d)]
+    if d.priced:
+        notes.append(_FREE_TIER_NOTE)
+    notes.append(_DRYRUN_NOTE)
+    return notes
+
+
+_BASIS_WARNINGS = frozenset(label.warning for label in BASIS_LABELS.values())
+
+
+def _row_tag(d: CostDelta) -> str | None:
+    """The marker naming what this row's figure actually is.
+
+    From the basis, never from `is_incremental`: the model being incremental does
+    not say which shape was dry-run, and tagging a model compiled against its
+    existing table `full-refresh` describes a measurement that was not taken. An
+    unknown basis yields no tag — unlabelled beats mislabelled.
+    """
+    label = BASIS_LABELS.get(d.basis) if d.basis is not None else None
+    return label.tag if label else None
+
+
+def _row_warnings(d: CostDelta) -> list[str]:
+    """A model's own caveats, minus the one that is really about its tag.
+
+    A basis warning explains what the tag on a row means, which is identical for
+    every row carrying that tag. Printed per model it scaled with the number of
+    incrementals in the change and pushed the warnings that *are* about one model
+    — a dynamic filter, a missing baseline — down a list of repeats.
+    """
+    return [w for w in d.warnings if w not in _BASIS_WARNINGS]
+
+
+def _basis_footnotes(report: Report) -> list[str]:
+    """One footnote per basis present, in registry order.
+
+    Keyed on the warnings the rows actually carry rather than on their tags, so a
+    footnote speaks for exactly the rows the per-row lines used to. The two look
+    interchangeable and are not: `sql_warnings` returns nothing at all for a model
+    with no compiled SQL, so a row can be tagged while never having carried the
+    warning, and a footnote driven off tags would start covering it.
+
+    A report can mix bases — one model compiled fresh, another against its
+    existing table — so this is a list. Returning the first would print one
+    footnote and leave the other tag unexplained.
+    """
+    carried = {w for d in report.deltas for w in d.warnings}
+    return [label.footnote for label in BASIS_LABELS.values() if label.warning in carried]
 
 
 def _delta_cell(d: CostDelta, currency: str) -> str:
@@ -147,8 +237,9 @@ def render_terminal(report: Report) -> str:
         flags = []
         if d.is_new:
             flags.append("new")
-        if d.is_incremental:
-            flags.append("full-refresh")
+        tag = _row_tag(d)
+        if tag:
+            flags.append(tag)
         flag_str = f"  ({', '.join(flags)})" if flags else ""
         cur = d0.currency
         if diff:
@@ -178,10 +269,15 @@ def render_terminal(report: Report) -> str:
             lines.append(
                 f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned   {cost}{monthly}"
             )
-        for w in d.warnings:
+        for w in _row_warnings(d):
             lines.append(f"      ⚠ {w}")
         if d.error:
             lines.append(f"      • {d.error}")
+
+    footnotes = _basis_footnotes(report)
+    if footnotes:
+        lines.append("")
+        lines.extend(f"  ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
     if net:
@@ -204,8 +300,7 @@ def render_terminal(report: Report) -> str:
         # The id leads: it is what a user puts in `notices.silence`, so it has to
         # be visible without going and looking it up.
         lines.append(f"  ⚠ {n.id}: {n.message}")
-    lines.append(f"  {_disclosure_line(d0)}")
-    lines.append(f"  {_DRYRUN_NOTE}")
+    lines.extend(f"  {note}" for note in _footer_notes(d0))
     return "\n".join(lines)
 
 
@@ -268,14 +363,18 @@ def render_markdown(report: Report) -> str:
             )
             out.append(f"| {_md_name(d)} | {humanize_bytes(d.bytes_current)} | {cost} | {month} |")
 
-    caveats = [(d.name, w) for d in report.deltas for w in d.warnings]
+    caveats = [(d.name, w) for d in report.deltas for w in _row_warnings(d)]
     errors = [(d.name, d.error) for d in report.deltas if d.error]
-    if caveats or errors:
+    footnotes = _basis_footnotes(report)
+    if caveats or errors or footnotes:
         out.append("")
         for name, w in caveats:
             out.append(f"> ⚠ **{name}** — {w}")
         for name, e in errors:
             out.append(f"> • **{name}** — {e}")
+        # Last: they annotate the table's tags rather than any one model, so they
+        # read as the footnotes they are instead of more per-model caveats.
+        out.extend(f"> ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
     if net:
@@ -300,7 +399,7 @@ def render_markdown(report: Report) -> str:
             out.append(f"> ⚠ **{n.id}** — {n.message}")
 
     out.append("")
-    out.append(f"<sub>{_disclosure_line(d0)}<br/>{_DRYRUN_NOTE}</sub>")
+    out.append(f"<sub>{'<br/>'.join(_footer_notes(d0))}</sub>")
     return "\n".join(out)
 
 
@@ -308,8 +407,9 @@ def _md_name(d: CostDelta) -> str:
     tags = []
     if d.is_new:
         tags.append("new")
-    if d.is_incremental:
-        tags.append("full-refresh")
+    tag = _row_tag(d)
+    if tag:
+        tags.append(tag)
     suffix = f" _{', '.join(tags)}_" if tags else ""
     return f"`{d.name}`{suffix}"
 
@@ -353,6 +453,10 @@ def render_json(report: Report) -> str:
                 "name": d.name,
                 "unique_id": d.unique_id,
                 "is_incremental": d.is_incremental,
+                # Which shape was dry-run. `is_incremental` is a fact about the
+                # model; this is a fact about the number beside it, and only this
+                # one says whether that number is a rebuild or a single run.
+                "basis": d.basis.value if d.basis else None,
                 "is_new": d.is_new,
                 "gateable": d.gateable,
                 "region": d.region,

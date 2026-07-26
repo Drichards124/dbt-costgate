@@ -69,7 +69,7 @@ comment itself — GitHub renders it from the same markdown dbt-costgate produce
 | `fct_orders_daily` _full-refresh_ | 819.20 GiB | 2.91 TiB | +264% | USD +13.19 | USD +395.63 |
 | `dim_customers` _new_ | — | 412.50 MiB | — | USD +0.00 | USD +0.07 |
 
-> ⚠ **fct_orders_daily** — incremental — figure is the full-refresh scan
+> ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
 
 **Net increase:** USD 13.19/run · USD 395.70/month
 
@@ -77,7 +77,7 @@ comment itself — GitHub renders it from the same markdown dbt-costgate produce
 - fct_orders_daily: USD +13.19/run exceeds USD 5.00
 - fct_orders_daily: +264% exceeds 25%
 
-<sub>Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
+<sub>Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)<br/>Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
 <!-- END GENERATED: pr-comment -->
 
 <details open>
@@ -94,8 +94,9 @@ dbt-costgate check --baseline path/to/main/manifest.json
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +395.63/month (30 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
 
   Net increase: USD 13.19/run · USD 395.70/month
 
@@ -104,6 +105,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: +264% exceeds 25%
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: diff-terminal -->
@@ -187,7 +189,7 @@ accuracy as a feature:
   ```
 
 - ⚙️ **Overridable** — `pricing.region` to force a region, `pricing.usd_per_tib` for negotiated or editions rates, `pricing.currency` to label amounts in your own currency (an ISO 4217 code — dbt-costgate labels, it never converts).
-- ⚠️ **Honest limits, stated up front** — under capacity/editions pricing, bytes scanned is a proxy signal, not your invoice; set a rate of `0` and reports drop money entirely and measure bytes instead. The 1 TiB/month free tier is not modeled by default.
+- ⚠️ **Honest limits, stated up front** — under capacity/editions pricing, bytes scanned is a proxy signal, not your invoice; set a rate of `0` and reports drop money entirely and measure bytes instead. Every priced report's footer discloses the 1 TiB/month on-demand free tier it does **not** deduct — the allowance is per billing account, which a dry-run cannot see, so figures are priced from the first byte.
 
 ## Security model
 

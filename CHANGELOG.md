@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`models[].basis` in the JSON report** — `full_refresh`, `incremental_form`,
+  `direct`, or `null` when it could not be established. It says which query shape
+  was dry-run, and so whether that model's figure is a rebuild or a single run.
+  `is_incremental` cannot answer this: it is true for both. Additive — every
+  existing field is unchanged.
+
 - **`dbt-costgate init`** — writes a starter `.dbt-costgate.yml`:
 
   ```bash
@@ -58,6 +64,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model — too slow to sit in front of every commit. It needs the same two things
   the CLI does (`dbt compile` first, BigQuery via ADC), and every `check` flag is
   available through `args:`. Requires pre-commit 3.2.0 or newer.
+
+### Changed
+
+- **The incremental caveat is now one footnote instead of one line per model.**
+  A change touching five incrementals printed the same sentence five times,
+  which pushed the caveats that are about a *specific* model — a dynamic filter,
+  a missing baseline — under a wall of repeats. Reports now tag the rows and
+  explain the tag once:
+
+  ```text
+    fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%
+    fct_events_hourly (full-refresh): 40.10 GiB → 44.02 GiB   +10%
+
+    ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh
+      scan, not an incremental run.
+  ```
+
+  The per-row `full-refresh` tag is unchanged, so you can still see exactly
+  which models it covers, and no other warning is collapsed. If you parse the
+  terminal or markdown output, note the string `incremental — figure is the
+  full-refresh scan` no longer appears in either. **The JSON payload is
+  unchanged** — `models[].warnings` still carries that warning per model, since
+  a machine reader has no repetition problem to solve.
+
+- **Priced reports now disclose the free tier they do not deduct**, in the footer
+  beside the rate they used:
+
+  ```text
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free
+  tier is per billing account, so it is disclosed here and never deducted.
+  ```
+
+  Not new behaviour — costs have always been priced from the first byte — but it
+  was stated only in the docs, which is the wrong place for it: someone comparing
+  a report against a bill has the report in front of them. The allowance is drawn
+  down by every other query the billing account runs that month, which a dry-run
+  cannot see, so deducting it would mean guessing. A figure therefore reads high
+  by at most one TiB's worth, and a gate that over-reports is safer than one that
+  lets a regression through.
+
+  Not configurable, by design: a setting could only mean "assume the tier is
+  still unspent", a claim about the whole billing account this tool cannot check.
+  The line does not appear when you have set `pricing.usd_per_tib: 0.00` — that
+  report quotes no money for it to adjust, and the tier is an on-demand allowance
+  that does not apply under capacity/Editions pricing at all. Nothing about the
+  gate, the breaches or the exit code changes; if you parse reports, note this
+  adds a line to the terminal footer and a `<br/>` segment to the markdown one.
+  The JSON payload is unchanged.
+
+  The docs previously called the free tier "not modeled **by default**", which
+  implied a setting that has never existed. That wording is gone.
+
+- **The docs now say plainly that dbt-costgate prices compute, not storage.**
+  BigQuery meters the two separately, and a dry-run reports the bytes a query
+  would scan — a compute figure that carries no storage information. Nothing
+  about what the tool measures has changed; it is now stated as the scope it has
+  always been, under
+  [what it will not do](https://github.com/Drichards124/dbt-costgate/blob/main/docs/explained.md#what-it-will-not-do),
+  with the case worth knowing called out: a `view` becoming a `table`, or an
+  `incremental` becoming a full `table`, moves real money on a meter nothing here
+  watches.
+
+### Fixed
+
+- **An incremental model compiled against its existing table is no longer
+  labelled `full-refresh`.** An incremental has two prices — the cost to rebuild
+  the table, and the cost of one run against the table as it already stands —
+  and which one a dry-run measures is decided by how the model was compiled.
+  Every incremental row was tagged `full-refresh` and told "figure is the
+  full-refresh scan" regardless, so a figure that was one incremental run read
+  as rebuild cost. On a large fact table those differ by orders of magnitude,
+  and the mislabelled one reads **low**.
+
+  This was not a rare case: a prod-run manifest captures incrementals in their
+  incremental form, which the usage guide already documents.
+
+  Rows are now labelled from the basis actually measured — `full-refresh` or the
+  new `incremental` tag — with a footnote under the table for each one present:
+
+  ```text
+    fct_orders_daily  (incremental): 92.16 GiB → 112.64 GiB   +22%   USD +0.13/run
+
+    ⚠ incremental — for the rows tagged above, the figure is one run against the
+      table as already built, so it does not gate rebuild cost.
+  ```
+
+  If you have a `max_usd_total` / `max_tib_total` ceiling on an incremental
+  believing it capped rebuild cost, check the tag: on an `incremental` row it
+  does not, and never did — the label was what said otherwise. The same applies
+  to `run_frequency`, which should count rebuilds for a `full-refresh` row and
+  runs for an `incremental` one.
+
+  Two things change in output. The `incremental` tag is new, so anything matching
+  on the literal `full-refresh` will no longer see these rows. And in JSON,
+  `models[].warnings` carries a different sentence for an incremental-form model.
+  `models[].is_incremental` is **unchanged** — it is true for both shapes, which
+  is why it could never have answered this.
 
 ## [0.8.0] - 2026-07-25
 

@@ -15,7 +15,14 @@ from __future__ import annotations
 
 from dbt_costgate import notices, policy, report
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import TIB, CostDelta, PricingDisclosure, Report
+from dbt_costgate.models import (
+    BASIS_LABELS,
+    TIB,
+    CostDelta,
+    EstimateBasis,
+    PricingDisclosure,
+    Report,
+)
 from dbt_costgate.pricing import PricingTable
 
 MIB = 1024**2
@@ -39,7 +46,7 @@ def _delta(
     baseline: int | None = None,
     *,
     rate: float = US_RATE,
-    incremental: bool = False,
+    basis: EstimateBasis | None = None,
     new: bool = False,
     warning: str | None = None,
     error: str | None = None,
@@ -49,10 +56,17 @@ def _delta(
     def usd(b: int | None) -> float | None:
         return None if b is None else b / TIB * rate
 
+    # The basis picks the warning, rather than a caller stating both and being
+    # free to pair a full-refresh label with an incremental-form figure — the
+    # exact contradiction these samples exist to keep out of the docs.
+    label = BASIS_LABELS.get(basis) if basis is not None else None
+    warnings = [w for w in (label.warning if label else None, warning) if w]
+
     return CostDelta(
         name=name,
         unique_id=f"model.shop.{name}",
-        is_incremental=incremental,
+        is_incremental=basis in BASIS_LABELS,
+        basis=basis,
         is_new=new,
         gateable=error is None,
         bytes_baseline=baseline,
@@ -60,7 +74,7 @@ def _delta(
         usd_baseline=usd(baseline),
         usd_current=usd(current),
         region=region,
-        warnings=[warning] if warning else [],
+        warnings=warnings,
         error=error,
         runs_per_month=runs,
     )
@@ -110,8 +124,7 @@ def _pr_deltas(rate: float = US_RATE):
             int(2.91 * TIB),
             int(0.80 * TIB),
             rate=rate,
-            incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            basis=EstimateBasis.FULL_REFRESH,
         ),
         _delta("dim_customers", int(412.5 * MIB), rate=rate, new=True),
     ]
@@ -141,8 +154,7 @@ def local_terminal() -> str:
         _delta(
             "fct_orders_daily",
             int(2.91 * TIB),
-            incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            basis=EstimateBasis.FULL_REFRESH,
         ),
         _delta("dim_customers", int(0.4016 * TIB)),
     ]
@@ -185,11 +197,34 @@ def mixed_frequency_terminal() -> str:
             "fct_orders_daily",
             int(2.91 * TIB),
             int(0.80 * TIB),
-            incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            basis=EstimateBasis.FULL_REFRESH,
             runs=4,
         ),
         _delta("dim_customers", int(412.5 * MIB), new=True, runs=30),
+    ]
+    return report.render_terminal(
+        _report(deltas, mode="diff", source="built-in table", thresholds=_gate())
+    )
+
+
+def incremental_form_terminal() -> str:
+    """The same model, compiled against its existing table.
+
+    A prod-run manifest captures incrementals this way, and the recommended CI
+    compile does too, so this is the shape many teams actually see. The row is
+    tagged `incremental` rather than `full-refresh` and the footnote says what
+    that figure is: one run against the table as already built. Kept as its own
+    sample because the two bases are the same model priced on different
+    questions, and a reader who only ever sees one cannot tell which they have.
+    """
+    deltas = [
+        _delta(
+            "fct_orders_daily",
+            int(0.11 * TIB),
+            int(0.09 * TIB),
+            basis=EstimateBasis.INCREMENTAL_FORM,
+            runs=30,
+        )
     ]
     return report.render_terminal(
         _report(deltas, mode="diff", source="built-in table", thresholds=_gate())
@@ -242,7 +277,13 @@ def config_template() -> str:
 
 def _slot_deltas():
     return [
-        _delta("fct_orders_daily", int(2.91 * TIB), int(0.80 * TIB), rate=0.0, incremental=True)
+        _delta(
+            "fct_orders_daily",
+            int(2.91 * TIB),
+            int(0.80 * TIB),
+            rate=0.0,
+            basis=EstimateBasis.FULL_REFRESH,
+        )
     ]
 
 
@@ -320,6 +361,7 @@ SAMPLES = {
     "slots-dead-threshold-terminal": (slots_dead_threshold_terminal, "text"),
     "unknown-region-terminal": (unknown_region_terminal, "text"),
     "mixed-frequency-terminal": (mixed_frequency_terminal, "text"),
+    "incremental-form-terminal": (incremental_form_terminal, "text"),
     "config-reference": (config_reference, None),
     "config-template": (config_template, "yaml"),
 }
