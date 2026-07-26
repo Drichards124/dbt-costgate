@@ -180,3 +180,38 @@ jobs:
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
           docker push "$IMAGE:$GITHUB_REF_NAME"
           docker push "$IMAGE:latest"
+
+      # A package pushed to ghcr.io under a user account is created *private*, and
+      # nothing in this workflow can change that — `docker pull` fails for
+      # everyone until a human flips it. That is a one-time step, so this asks
+      # the API instead of nagging on every release: a reminder that prints
+      # forever is one people learn to scroll past. An unanswerable question is
+      # treated as "not public", because assuming otherwise is the failure this
+      # step exists to catch.
+      - name: Check the pushed image is actually pullable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          pkg="${GITHUB_REPOSITORY#*/}"
+          # `gh api` prints its error JSON on stdout, so the assignment has to be
+          # overwritten on failure rather than appended to — otherwise a 404 body
+          # ends up in the message below.
+          visibility="$(gh api "users/$owner/packages/container/$pkg" --jq .visibility 2>/dev/null)" || visibility=unknown
+          if [ "$visibility" = "public" ]; then
+            echo "Container package is public." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### One manual step left: the container package is not public"
+            echo ""
+            echo "Its visibility reads \`$visibility\`. A package pushed to ghcr.io under a"
+            echo "user account is created private, and this workflow cannot change that —"
+            echo "\`docker pull $IMAGE\` fails for everyone until you do."
+            echo ""
+            echo "1. Open <https://github.com/users/$owner/packages/container/$pkg/settings>"
+            echo "2. **Change visibility** → Public"
+            echo ""
+            echo "Linking to this repository needs nothing: the image already carries the"
+            echo "\`org.opencontainers.image.source\` label."
+          } >> "$GITHUB_STEP_SUMMARY"
