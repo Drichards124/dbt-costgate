@@ -194,3 +194,26 @@ def test_the_documented_action_pin_matches_the_version_we_ship():
         f"usage.md pins the Action at {documented['Drichards124/dbt-costgate']} but the "
         f"package version is {__version__} — release prep missed a site"
     )
+
+
+# The pre-commit hook is pinned by `rev:` exactly the way the Action is pinned by
+# `uses:` — another version a reader copies verbatim, in two files this time.
+# Enforcing it here keeps release prep at the sites you already know about.
+
+_PRE_COMMIT_REV = __import__("re").compile(
+    r"repo:\s*https://github\.com/Drichards124/dbt-costgate\s*\n[#\s]*rev:\s*(\S+)"
+)
+_REV_SITES = ["docs/usage.md", ".pre-commit-hooks.yaml"]
+
+
+def test_the_documented_pre_commit_rev_matches_the_version_we_ship():
+    from dbt_costgate import __version__
+
+    stale = []
+    for site in _REV_SITES:
+        pinned = set(_PRE_COMMIT_REV.findall((ROOT / site).read_text("utf-8")))
+        # An example that lost its `rev:` would otherwise read as agreement.
+        assert pinned, f"{site} no longer shows a pinned pre-commit example to check"
+        if pinned != {f"v{__version__}"}:
+            stale.append(f"{site} pins {sorted(pinned)}, package version is {__version__}")
+    assert not stale, "release prep missed a site:\n  " + "\n  ".join(stale)

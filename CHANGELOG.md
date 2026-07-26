@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
+## [Unreleased]
+
+### Added
+
+- **A `pre-commit` hook**, id `dbt-costgate`. If your team runs
+  [pre-commit](https://pre-commit.com), adding this repository to your
+  `.pre-commit-config.yaml` catches an expensive change on your own machine
+  rather than in review. The config block to copy is in the
+  [usage guide](https://github.com/Drichards124/dbt-costgate/blob/main/docs/usage.md#pre-commit-hook).
+
+  It runs at the **pre-push** stage, so install it with the stage named:
+
+  ```bash
+  pre-commit install --hook-type pre-push
+  ```
+
+  A plain `pre-commit install` will not fire it. Pre-push rather than pre-commit
+  because the check needs a compiled target and a BigQuery round-trip per changed
+  model — too slow to sit in front of every commit. It needs the same two things
+  the CLI does (`dbt compile` first, BigQuery via ADC), and every `check` flag is
+  available through `args:`. Requires pre-commit 3.2.0 or newer.
+
 ## [0.8.0] - 2026-07-25
 
 ### Added

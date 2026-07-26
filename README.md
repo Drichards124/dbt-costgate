@@ -208,7 +208,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **GitHub Action** wrapper with a sticky PR comment
 - [x] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
 - [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
-- [ ] **`pre-commit` hook** entry
+- [x] **`pre-commit` hook** — catch it on your own machine, at pre-push
 - [ ] **Docker image** on ghcr.io (GitLab CI–friendly)
 
 ## Non-goals
