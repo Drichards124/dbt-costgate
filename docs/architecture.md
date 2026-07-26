@@ -72,8 +72,15 @@ PR working tree  ───┘                                          │
 Versioned `pricing.json` (region → on-demand $/TiB, `last_verified` date,
 table version) bundled with the package. Region auto-detected from the dry-run
 job / dbt profile; overridable (`pricing.region`, `pricing.usd_per_tib`).
-Free tier (1 TiB/month) not modeled by default. Editions/slot pricing: bytes
-is a documented proxy, not an invoice prediction.
+Compute only, by scope: BigQuery meters compute and storage separately, and a
+dry-run reports bytes a query would scan — a compute figure carrying no storage
+information. Storage is a non-goal, not an unimplemented feature.
+
+Free tier (1 TiB/month, per billing account) is disclosed in the report footer,
+never deducted: its consumption is account-wide and invisible from a dry-run, so
+subtracting it would mean guessing, and guessing low is the wrong direction for a
+gate. Editions/slot pricing: bytes is a documented proxy, not an invoice
+prediction.
 
 ## Known hard edges (design drivers)
 

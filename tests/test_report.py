@@ -423,3 +423,57 @@ def test_a_notice_is_not_confusable_with_a_gate_breach():
     md = report.render_markdown(rep)
     assert "✅ **Gate: PASS**" in md
     assert f"\n- {_NOTICE.message}" not in md
+
+
+def _md_footer(out: str) -> list[str]:
+    return out.rsplit("<sub>", 1)[1].split("</sub>")[0].split("<br/>")
+
+
+def test_a_priced_footer_discloses_the_free_tier_it_does_not_deduct():
+    """The one adjustment that separates these figures from the same bytes on an
+    invoice, and it is not applied. It belongs beside the figure rather than only
+    in the docs — a reader comparing a report against a bill has the report in
+    front of them and the docs somewhere else."""
+    for out in (report.render_terminal(_report()), report.render_markdown(_report())):
+        assert "free tier" in out
+        assert "never deducted" in out
+
+
+def test_the_footer_stays_on_the_meter_the_report_is_about():
+    """Every figure here prices bytes scanned, which is compute. Storage is a
+    separate BigQuery meter that this tool does not price at all — a scope
+    boundary, documented as a non-goal, and not an adjustment pending on a compute
+    number. Naming it under one would imply the report had weighed it and found it
+    zero, and would invite the same disclaimer for every other meter dbt-costgate
+    is equally not about.
+    """
+    for out in (report.render_terminal(_report()), report.render_markdown(_report())):
+        assert "storage" not in out.lower()
+
+
+def test_an_unpriced_footer_claims_no_adjustment_to_a_price_it_never_quoted():
+    """Under slots the report quotes no money at all, so "the free tier is not
+    deducted" would describe arithmetic that did not happen — and the free tier is
+    an on-demand allowance that does not apply to capacity pricing anyway. The
+    unpriced disclosure already says the report measures scanned bytes only, which
+    is the same statement for a report with no money in it."""
+    for out in (
+        report.render_terminal(_unpriced_report()),
+        report.render_markdown(_unpriced_report()),
+    ):
+        assert "free tier" not in out
+        assert "measures scanned bytes only" in out
+
+
+def test_both_renderers_carry_the_same_footer_notes():
+    """The free-tier note is conditional, and the terminal and markdown footers
+    are assembled separately. Left unchecked, one renderer keeps a note the other
+    drops and the same run discloses different things depending on where it is
+    read. Compared as a whole list so an added note is covered without anyone
+    remembering to extend this test."""
+    for rep in (_report(), _unpriced_report()):
+        terminal = [
+            line.strip() for line in report.render_terminal(rep).split("\n") if line.strip()
+        ]
+        markdown = _md_footer(report.render_markdown(rep))
+        assert terminal[-len(markdown) :] == markdown
