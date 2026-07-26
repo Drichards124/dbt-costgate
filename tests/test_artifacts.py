@@ -6,7 +6,7 @@ import pytest
 from conftest import make_macro, make_manifest, make_node, write_target
 from dbt_costgate import artifacts
 from dbt_costgate.artifacts import ArtifactError
-from dbt_costgate.models import EstimateBasis
+from dbt_costgate.models import BASIS_LABELS, EstimateBasis
 
 
 def test_node_filtering_excludes_noncost_and_python_and_ephemeral():
@@ -241,3 +241,57 @@ def test_touches_project_config_spots_only_this_projects_dbt_project_yml():
     assert artifacts.touches_project_config(["dbt_project.yml"])
     assert not artifacts.touches_project_config(["other_project/dbt_project.yml"])
     assert not artifacts.touches_project_config(["models/dbt_project_notes.md"])
+
+
+def test_the_warning_describes_the_basis_that_was_measured():
+    """An incremental model compiled against its existing table was dry-run in
+    incremental form, so its figure is one run and not a rebuild. Deriving the
+    warning from `node.is_incremental` told it the opposite: true of the model,
+    false of the number beside it, and wrong in the direction that matters — an
+    incremental figure read as rebuild cost badly understates a rebuild.
+    """
+    uid, node_dict = make_node("inc", materialized="incremental", relation_name="`p`.`s`.`inc`")
+    node = artifacts.model_nodes(make_manifest((uid, node_dict)))[uid]
+
+    fresh = artifacts.sql_warnings(node, "select * from x where 1")
+    incremental = artifacts.sql_warnings(
+        node, "select * from x where ts > (select max(ts) from `p`.`s`.`inc`)"
+    )
+    assert BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning in fresh
+    assert BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM].warning in incremental
+    # Neither may carry the other's: the two make opposite claims about the figure.
+    assert BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM].warning not in fresh
+    assert BASIS_LABELS[EstimateBasis.FULL_REFRESH].warning not in incremental
+
+
+def test_the_warning_and_the_basis_are_one_answer_to_one_question():
+    """`sql_warnings` and `detect_basis` are called separately — the first by the
+    estimator for the model, the second for the row's label. Left to compute the
+    basis independently they could disagree about the same SQL, which is exactly
+    how the row tag and the warning came apart. Asserted across both shapes."""
+    uid, node_dict = make_node("inc", materialized="incremental", relation_name="`p`.`s`.`inc`")
+    node = artifacts.model_nodes(make_manifest((uid, node_dict)))[uid]
+    for sql in ("select * from x where 1", "select * from `p`.`s`.`inc`"):
+        basis = artifacts.detect_basis(node, sql)
+        assert BASIS_LABELS[basis].warning in artifacts.sql_warnings(node, sql)
+
+
+def test_a_non_incremental_model_gets_no_basis_warning():
+    """DIRECT is absent from the registry because a table or a view compiles one
+    way — there is no basis to disambiguate and so nothing to say."""
+    uid, node_dict = make_node("plain")
+    node = artifacts.model_nodes(make_manifest((uid, node_dict)))[uid]
+    warnings = artifacts.sql_warnings(node, "select * from x")
+    assert not any(w == label.warning for label in BASIS_LABELS.values() for w in warnings)
+    assert EstimateBasis.DIRECT not in BASIS_LABELS
+
+
+def test_every_basis_that_needs_a_label_has_a_complete_one():
+    """The tag, the warning and the footnote are three renderings of one fact and
+    live in one entry, so a new basis cannot be added while leaving a renderer to
+    guess. DIRECT is the only exemption, and it is asserted rather than assumed —
+    otherwise this passes by finding nothing to check."""
+    labelled = set(BASIS_LABELS)
+    assert labelled == set(EstimateBasis) - {EstimateBasis.DIRECT}
+    for basis, label in BASIS_LABELS.items():
+        assert label.tag and label.warning and label.footnote, basis

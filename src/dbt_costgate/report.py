@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 from dbt_costgate.models import (
-    INCREMENTAL_BASIS_WARNING,
+    BASIS_LABELS,
     CostDelta,
     PricingDisclosure,
     Report,
@@ -114,35 +114,47 @@ def _footer_notes(d: PricingDisclosure) -> list[str]:
     return notes
 
 
-_INCREMENTAL_FOOTNOTE = (
-    "full-refresh — for the rows tagged above, the figure is the full-refresh "
-    "scan, not an incremental run."
-)
+_BASIS_WARNINGS = frozenset(label.warning for label in BASIS_LABELS.values())
+
+
+def _row_tag(d: CostDelta) -> str | None:
+    """The marker naming what this row's figure actually is.
+
+    From the basis, never from `is_incremental`: the model being incremental does
+    not say which shape was dry-run, and tagging a model compiled against its
+    existing table `full-refresh` describes a measurement that was not taken. An
+    unknown basis yields no tag — unlabelled beats mislabelled.
+    """
+    label = BASIS_LABELS.get(d.basis) if d.basis is not None else None
+    return label.tag if label else None
 
 
 def _row_warnings(d: CostDelta) -> list[str]:
-    """A model's own caveats, minus the one that is really about the tag.
+    """A model's own caveats, minus the one that is really about its tag.
 
-    The incremental warning explains what `full-refresh` on a row means, which is
-    identical for every row carrying it. Printed per model it scaled with the
-    number of incrementals in the change and pushed the warnings that *are* about
-    one model — a dynamic filter, a missing baseline — down a list of repeats.
+    A basis warning explains what the tag on a row means, which is identical for
+    every row carrying that tag. Printed per model it scaled with the number of
+    incrementals in the change and pushed the warnings that *are* about one model
+    — a dynamic filter, a missing baseline — down a list of repeats.
     """
-    return [w for w in d.warnings if w != INCREMENTAL_BASIS_WARNING]
+    return [w for w in d.warnings if w not in _BASIS_WARNINGS]
 
 
-def _incremental_footnote(report: Report) -> str | None:
-    """The collapsed warning, or None when no row carried it.
+def _basis_footnotes(report: Report) -> list[str]:
+    """One footnote per basis present, in registry order.
 
-    Keyed on the warning itself rather than on `is_incremental`, so the footnote
-    speaks for exactly the rows the per-row lines used to. The two conditions look
+    Keyed on the warnings the rows actually carry rather than on their tags, so a
+    footnote speaks for exactly the rows the per-row lines used to. The two look
     interchangeable and are not: `sql_warnings` returns nothing at all for a model
-    with no compiled SQL, so a footnote driven off the tag would start covering
-    rows that never carried the warning.
+    with no compiled SQL, so a row can be tagged while never having carried the
+    warning, and a footnote driven off tags would start covering it.
+
+    A report can mix bases — one model compiled fresh, another against its
+    existing table — so this is a list. Returning the first would print one
+    footnote and leave the other tag unexplained.
     """
-    if any(INCREMENTAL_BASIS_WARNING in d.warnings for d in report.deltas):
-        return _INCREMENTAL_FOOTNOTE
-    return None
+    carried = {w for d in report.deltas for w in d.warnings}
+    return [label.footnote for label in BASIS_LABELS.values() if label.warning in carried]
 
 
 def _delta_cell(d: CostDelta, currency: str) -> str:
@@ -225,8 +237,9 @@ def render_terminal(report: Report) -> str:
         flags = []
         if d.is_new:
             flags.append("new")
-        if d.is_incremental:
-            flags.append("full-refresh")
+        tag = _row_tag(d)
+        if tag:
+            flags.append(tag)
         flag_str = f"  ({', '.join(flags)})" if flags else ""
         cur = d0.currency
         if diff:
@@ -261,10 +274,10 @@ def render_terminal(report: Report) -> str:
         if d.error:
             lines.append(f"      • {d.error}")
 
-    footnote = _incremental_footnote(report)
-    if footnote:
+    footnotes = _basis_footnotes(report)
+    if footnotes:
         lines.append("")
-        lines.append(f"  ⚠ {footnote}")
+        lines.extend(f"  ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
     if net:
@@ -352,17 +365,16 @@ def render_markdown(report: Report) -> str:
 
     caveats = [(d.name, w) for d in report.deltas for w in _row_warnings(d)]
     errors = [(d.name, d.error) for d in report.deltas if d.error]
-    footnote = _incremental_footnote(report)
-    if caveats or errors or footnote:
+    footnotes = _basis_footnotes(report)
+    if caveats or errors or footnotes:
         out.append("")
         for name, w in caveats:
             out.append(f"> ⚠ **{name}** — {w}")
         for name, e in errors:
             out.append(f"> • **{name}** — {e}")
-        # Last: it annotates the table's tags rather than any one model, so it
-        # reads as the footnote it is instead of another per-model caveat.
-        if footnote:
-            out.append(f"> ⚠ {footnote}")
+        # Last: they annotate the table's tags rather than any one model, so they
+        # read as the footnotes they are instead of more per-model caveats.
+        out.extend(f"> ⚠ {note}" for note in footnotes)
 
     net = _net_line(report)
     if net:
@@ -395,8 +407,9 @@ def _md_name(d: CostDelta) -> str:
     tags = []
     if d.is_new:
         tags.append("new")
-    if d.is_incremental:
-        tags.append("full-refresh")
+    tag = _row_tag(d)
+    if tag:
+        tags.append(tag)
     suffix = f" _{', '.join(tags)}_" if tags else ""
     return f"`{d.name}`{suffix}"
 
@@ -440,6 +453,10 @@ def render_json(report: Report) -> str:
                 "name": d.name,
                 "unique_id": d.unique_id,
                 "is_incremental": d.is_incremental,
+                # Which shape was dry-run. `is_incremental` is a fact about the
+                # model; this is a fact about the number beside it, and only this
+                # one says whether that number is a rebuild or a single run.
+                "basis": d.basis.value if d.basis else None,
                 "is_new": d.is_new,
                 "gateable": d.gateable,
                 "region": d.region,

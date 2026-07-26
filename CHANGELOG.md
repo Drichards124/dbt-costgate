@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`models[].basis` in the JSON report** — `full_refresh`, `incremental_form`,
+  `direct`, or `null` when it could not be established. It says which query shape
+  was dry-run, and so whether that model's figure is a rebuild or a single run.
+  `is_incremental` cannot answer this: it is true for both. Additive — every
+  existing field is unchanged.
+
 - **`dbt-costgate init`** — writes a starter `.dbt-costgate.yml`:
 
   ```bash
@@ -119,6 +125,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the case worth knowing called out: a `view` becoming a `table`, or an
   `incremental` becoming a full `table`, moves real money on a meter nothing here
   watches.
+
+### Fixed
+
+- **An incremental model compiled against its existing table is no longer
+  labelled `full-refresh`.** An incremental has two prices — the cost to rebuild
+  the table, and the cost of one run against the table as it already stands —
+  and which one a dry-run measures is decided by how the model was compiled.
+  Every incremental row was tagged `full-refresh` and told "figure is the
+  full-refresh scan" regardless, so a figure that was one incremental run read
+  as rebuild cost. On a large fact table those differ by orders of magnitude,
+  and the mislabelled one reads **low**.
+
+  This was not a rare case: a prod-run manifest captures incrementals in their
+  incremental form, which the usage guide already documents.
+
+  Rows are now labelled from the basis actually measured — `full-refresh` or the
+  new `incremental` tag — with a footnote under the table for each one present:
+
+  ```text
+    fct_orders_daily  (incremental): 92.16 GiB → 112.64 GiB   +22%   USD +0.13/run
+
+    ⚠ incremental — for the rows tagged above, the figure is one run against the
+      table as already built, so it does not gate rebuild cost.
+  ```
+
+  If you have a `max_usd_total` / `max_tib_total` ceiling on an incremental
+  believing it capped rebuild cost, check the tag: on an `incremental` row it
+  does not, and never did — the label was what said otherwise. The same applies
+  to `run_frequency`, which should count rebuilds for a `full-refresh` row and
+  runs for an `incremental` one.
+
+  Two things change in output. The `incremental` tag is new, so anything matching
+  on the literal `full-refresh` will no longer see these rows. And in JSON,
+  `models[].warnings` carries a different sentence for an incremental-form model.
+  `models[].is_incremental` is **unchanged** — it is true for both shapes, which
+  is why it could never have answered this.
 
 ## [0.8.0] - 2026-07-25
 

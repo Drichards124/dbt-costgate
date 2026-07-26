@@ -146,6 +146,7 @@ def build_deltas(
                 unique_id=est.node.unique_id,
                 is_incremental=est.is_incremental,
                 is_new=est.is_new,
+                basis=est.basis_current,
                 gateable=gateable and est.bytes_current is not None,
                 bytes_baseline=est.bytes_baseline,
                 bytes_current=est.bytes_current,
