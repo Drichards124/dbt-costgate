@@ -188,6 +188,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: +264% exceeds 25%
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: mixed-frequency-terminal -->
@@ -350,6 +351,21 @@ approximately. Other warehouses come only where the cost model genuinely
 transfers — and for slot-based warehouses, per the section above, much of it does
 not.
 
+**It prices compute, not storage.** BigQuery bills these on two separate meters:
+compute is what a query scans when it runs, storage is what a table costs to sit
+there. dbt-costgate is a compute tool end to end — a dry-run reports bytes a
+query *would* scan, which is a statement about compute and contains no
+information about storage at all. So a change that scans no more than before but
+materializes a far larger table reports no cost impact, and that is the tool
+answering the question it asks rather than missing one.
+
+> Worth knowing where the boundary bites: a `view` becoming a `table`, or an
+> `incremental` becoming a full `table`, moves real money on a meter nothing
+> here watches. Storage is billed on bytes held over time, so pricing it would
+> mean knowing a table's size and how long it lives — neither of which a dry-run
+> of the SQL that builds it can tell you. It is a different tool, not a missing
+> feature of this one.
+
 **It does not convert currencies**, model the free tier, or estimate slot cost.
 
 ---
@@ -456,14 +472,22 @@ be resolved at dry-run time, so BigQuery reports a full-table scan.
 > they are. Put heavily-partitioned ones under `warn_only` to keep reporting them
 > without blocking, or `exclude` to drop them from gating entirely.
 
-**The free tier is not modelled.** The first 1 TiB per month is free per account,
-which dbt-costgate cannot know the consumption of, so it prices from the first
-byte.
+**The free tier is disclosed, never deducted.** BigQuery's on-demand pricing
+includes the first 1 TiB of query data processed each month free — and that
+allowance belongs to the whole **billing account**, not to your dbt project. Every
+other query anyone runs that month draws it down. A dry-run reports bytes for one
+statement and says nothing about the account's month to date, so dbt-costgate
+prices from the first byte and states so in the footer of every priced report.
 
 > **What to do:** nothing available, and the bias is deliberate — over-reporting
 > a small change is safer for a gate than under-reporting one. It matters least
 > where it matters most: on any change big enough to be worth blocking, one free
-> TiB is noise.
+> TiB is noise. There is deliberately no setting to switch it on: it could only
+> ever mean "assume the tier is still unspent", which is a claim about the entire
+> billing account that the tool has no way to check, and a gate that quietly
+> forgives the first TiB of a regression because of an unverified assumption is
+> worse than one that over-reports honestly. Note the tier is an on-demand
+> allowance and does not apply under capacity/Editions pricing at all.
 
 **Config changes with identical compiled SQL are invisible.** Changing
 `partition_by` or `cluster_by` may not change *this* model's compiled SQL at all.

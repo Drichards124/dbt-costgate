@@ -59,6 +59,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the CLI does (`dbt compile` first, BigQuery via ADC), and every `check` flag is
   available through `args:`. Requires pre-commit 3.2.0 or newer.
 
+### Changed
+
+- **Priced reports now disclose the free tier they do not deduct**, in the footer
+  beside the rate they used:
+
+  ```text
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free
+  tier is per billing account, so it is disclosed here and never deducted.
+  ```
+
+  Not new behaviour — costs have always been priced from the first byte — but it
+  was stated only in the docs, which is the wrong place for it: someone comparing
+  a report against a bill has the report in front of them. The allowance is drawn
+  down by every other query the billing account runs that month, which a dry-run
+  cannot see, so deducting it would mean guessing. A figure therefore reads high
+  by at most one TiB's worth, and a gate that over-reports is safer than one that
+  lets a regression through.
+
+  Not configurable, by design: a setting could only mean "assume the tier is
+  still unspent", a claim about the whole billing account this tool cannot check.
+  The line does not appear when you have set `pricing.usd_per_tib: 0.00` — that
+  report quotes no money for it to adjust, and the tier is an on-demand allowance
+  that does not apply under capacity/Editions pricing at all. Nothing about the
+  gate, the breaches or the exit code changes; if you parse reports, note this
+  adds a line to the terminal footer and a `<br/>` segment to the markdown one.
+  The JSON payload is unchanged.
+
+  The docs previously called the free tier "not modeled **by default**", which
+  implied a setting that has never existed. That wording is gone.
+
+- **The docs now say plainly that dbt-costgate prices compute, not storage.**
+  BigQuery meters the two separately, and a dry-run reports the bytes a query
+  would scan — a compute figure that carries no storage information. Nothing
+  about what the tool measures has changed; it is now stated as the scope it has
+  always been, under
+  [what it will not do](https://github.com/Drichards124/dbt-costgate/blob/main/docs/explained.md#what-it-will-not-do),
+  with the case worth knowing called out: a `view` becoming a `table`, or an
+  `incremental` becoming a full `table`, moves real money on a meter nothing here
+  watches.
+
 ## [0.8.0] - 2026-07-25
 
 ### Added

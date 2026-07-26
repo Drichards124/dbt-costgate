@@ -2,9 +2,14 @@
 
 # Using dbt-costgate
 
-`dbt-costgate check` estimates the BigQuery cost impact of the dbt models a change
-touches. It reads compiled dbt artifacts, dry-runs each changed model (free —
-nothing is executed), prices the bytes region-aware, and reports.
+`dbt-costgate check` estimates the BigQuery **compute** cost impact of the dbt
+models a change touches. It reads compiled dbt artifacts, dry-runs each changed
+model (free — nothing is executed), prices the bytes region-aware, and reports.
+
+Compute is the scope, not a subset of it: BigQuery bills compute and storage on
+separate meters, and a dry-run reports the bytes a query would scan, which says
+nothing about what the table it writes then costs to keep. Storage is a
+[deliberate non-goal](explained.md#what-it-will-not-do).
 
 > dbt-costgate never runs a billable query and never handles a credential. Auth is
 > Application Default Credentials, exactly like dbt-bigquery.
@@ -51,6 +56,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
   GATE: PASS
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: local-terminal -->
@@ -98,6 +104,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: +264% exceeds 25%
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: diff-terminal -->
@@ -238,6 +245,7 @@ dbt-costgate — region: US · on-demand USD 4.10/TiB · user override
     - fct_orders_daily: +264% exceeds 25%
 
   Pricing: US USD 4.10/TiB · user override (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: negotiated-terminal -->
@@ -326,6 +334,7 @@ dbt-costgate — region: northamerica-northeast3 · on-demand USD 6.25/TiB · de
 
   ⚠ unverified-region-rate: No verified rate for northamerica-northeast3 — priced at the USD 6.25/TiB default, which is the lowest rate BigQuery charges anywhere, so the cost shown may be understated. Set the rate you actually pay: pricing.regions (northamerica-northeast3: <rate>) for that location, pricing.usd_per_tib for one flat rate everywhere, or pricing.region to pin pricing to a location you have a rate for. Your value always wins over the built-in table. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [unverified-region-rate].
   Pricing: northamerica-northeast3 USD 6.25/TiB · default fallback (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: unknown-region-terminal -->
@@ -352,6 +361,7 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
   GATE: PASS
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: saving-terminal -->
@@ -606,6 +616,15 @@ fake it; it flags it.
   negotiated/editions rate flatly with `pricing.usd_per_tib`, or per region with
   `pricing.regions` (see below). When a report spans regions with different
   sources, each region is tagged (`override` / `table` / `fallback`).
+- **The free tier is disclosed, never deducted**, in the footer of every priced
+  report rather than only here. The 1 TiB/month on-demand allowance belongs to
+  the **billing account** and is drawn down by every other query anyone runs that
+  month, which a dry-run cannot see — so figures are priced from the first byte
+  and read high by up to one TiB's worth. Not configurable, by design: a setting
+  could only mean "assume the tier is still unspent", and a gate that forgives
+  the first TiB of a regression on an unverified assumption is worse than one
+  that over-reports honestly. The tier is an on-demand allowance and does not
+  apply under capacity/Editions pricing at all.
 - **Capacity / Editions (slot) pricing.** Slot cost cannot be estimated before a
   query runs — a dry-run reports bytes, never slot time, and slot consumption only
   exists once a job has executed. So under slots, bytes scanned is a *work* signal,

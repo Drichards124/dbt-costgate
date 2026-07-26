@@ -13,6 +13,28 @@ from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status, fo
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
 
+# The one thing that makes a figure here differ from the same bytes on an
+# invoice. Stated rather than subtracted: the allowance belongs to the whole
+# billing account, which dbt-costgate has no way to see, so deducting it would
+# mean guessing. Over-reporting is the safe direction for a gate —
+# under-reporting is what lets a regression through.
+#
+# Scoped to compute on purpose. Every figure in this report is a price for bytes
+# scanned, and this names the one adjustment that applies to those bytes and is
+# not made. Storage is a different meter with its own rate and its own free
+# allowance; dbt-costgate does not price it, but that is the tool's scope rather
+# than a caveat on this number, and the footer under a compute figure is not
+# where a reader is owed the boundaries of the product.
+#
+# A footer line and not a `notices.py` entry, either: a notice describes
+# configuration that cannot do what it looks like it does, so it is conditional
+# and silenceable, while this is true of every priced report — and a notice that
+# always fires is noise rather than signal.
+_FREE_TIER_NOTE = (
+    "Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free "
+    "tier is per billing account, so it is disclosed here and never deducted."
+)
+
 
 def humanize_bytes(n: int | None) -> str:
     if n is None:
@@ -65,6 +87,24 @@ def _disclosure_line(d: PricingDisclosure) -> str:
         parts.append(token)
     regions = " · ".join(parts) or "—"
     return f"Pricing: {regions} · {d.source} (table {d.table_version}, verified {d.last_verified})"
+
+
+def _footer_notes(d: PricingDisclosure) -> list[str]:
+    """The footer every renderer ends with, in order.
+
+    Built here rather than in each renderer so terminal and markdown cannot come
+    to disagree about which notes apply — the free-tier line is conditional, and
+    a condition written twice is a condition that eventually differs.
+
+    The unpriced footer omits it. The free tier is an on-demand allowance that
+    does not apply to capacity/Editions pricing at all, and a report quoting no
+    money has no figure for it to adjust.
+    """
+    notes = [_disclosure_line(d)]
+    if d.priced:
+        notes.append(_FREE_TIER_NOTE)
+    notes.append(_DRYRUN_NOTE)
+    return notes
 
 
 def _delta_cell(d: CostDelta, currency: str) -> str:
@@ -204,8 +244,7 @@ def render_terminal(report: Report) -> str:
         # The id leads: it is what a user puts in `notices.silence`, so it has to
         # be visible without going and looking it up.
         lines.append(f"  ⚠ {n.id}: {n.message}")
-    lines.append(f"  {_disclosure_line(d0)}")
-    lines.append(f"  {_DRYRUN_NOTE}")
+    lines.extend(f"  {note}" for note in _footer_notes(d0))
     return "\n".join(lines)
 
 
@@ -300,7 +339,7 @@ def render_markdown(report: Report) -> str:
             out.append(f"> ⚠ **{n.id}** — {n.message}")
 
     out.append("")
-    out.append(f"<sub>{_disclosure_line(d0)}<br/>{_DRYRUN_NOTE}</sub>")
+    out.append(f"<sub>{'<br/>'.join(_footer_notes(d0))}</sub>")
     return "\n".join(out)
 
 
