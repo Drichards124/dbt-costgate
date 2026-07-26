@@ -68,7 +68,17 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 <!-- END GENERATED: local-terminal -->
 
 Pick models explicitly with `--select name1,name2` (e.g. pipe
-`dbt ls --select state:modified` for dbt-authoritative selection).
+`dbt ls --select state:modified` for dbt-authoritative selection). A name that
+matches nothing is an error, not an empty run — so a selection list built from a
+script fails loudly the day it goes stale, instead of checking nothing.
+
+The table adapts to your terminal. It gives up columns in a fixed order when the
+window is narrow and says which it hid, never the model name or the per-run cost,
+and below 60 columns it prints one block per model instead. Colour follows
+`--color auto|always|never` (default `auto`: on at a terminal, off when piped,
+and off whenever `NO_COLOR` is set). A report written with `--output` or piped
+always renders at a fixed width with no escape sequences, so a captured report
+does not depend on the window that produced it.
 
 ### Gate locally with absolute ceilings
 
@@ -122,9 +132,12 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 ```
 <!-- END GENERATED: diff-terminal -->
 
-Exit codes: **0** pass, **1** gate failed, **2** dbt-costgate couldn't run
-(bad args, missing/uncompiled manifest, auth failure, or every model errored).
-CI can hard-block on 1 and alert-only on 2.
+Exit codes: **0** pass, **1** gate failed — a threshold was breached, or the gate
+could not check a model it was asked to enforce against — **2** dbt-costgate
+couldn't run (bad args, a malformed config, a missing/uncompiled manifest, a
+manifest from another warehouse, auth failure, or every model errored
+operationally). CI can hard-block on 1 and alert-only on 2. See
+[When the gate cannot check a model](#when-the-gate-cannot-check-a-model).
 
 ### Getting the baseline
 
@@ -354,6 +367,21 @@ including one added in a later release. An unknown id is an error rather than a
 no-op: a typo would otherwise leave a warning on that you believe you turned off.
 `dbt-costgate config` lists every valid id.
 
+**A related blind spot: `new-models-not-percentage-gated`.** `max_pct_increase`
+compares a before with an after, so it cannot cover a model that has no before.
+If percentage growth is the only threshold you set — which is a reasonable choice,
+and the only one available under slot pricing — then every model a pull request
+*adds* goes through ungated. That is not a failed check, so it does not fail the
+run; adding models is ordinary, and blocking every pull request that does one
+would just teach the team to switch the gate off. Instead the report names the
+models that went through and points at the two thresholds that need no baseline:
+
+```yaml
+thresholds:
+  max_pct_increase: 25
+  max_tib_total: 3.00      # gates a new model too
+```
+
 **On a location the bundled table doesn't know** — a region Google opened after
 the table was last verified. dbt-costgate falls back to a default rate rather
 than refusing to price, and tells you which way that guess errs:
@@ -443,6 +471,36 @@ internal tracking. dbt-costgate supports that without ever blocking a deploy:
 
 This also gives a gradual rollout: start `never` (observe), move to `warn`
 (soft-signal), then `fail` (enforce) once the team is comfortable.
+
+## When the gate cannot check a model
+
+A model dbt-costgate could not measure fails a run that configured any threshold.
+That is deliberate, and it is a change from earlier versions, which reported
+`PASS` and exit 0. There are four ways to reach it, all of them ordinary:
+
+| What happened | What to do about it |
+|---|---|
+| the baseline was compiled a different way from the branch (`mixed basis`) | compile both sides the same way — see [Incremental models](#incremental-models) |
+| a model's dry-run returned no size | the message on the row says why: permissions, invalid SQL, a missing upstream |
+| the baseline manifest has no compiled SQL for it | the baseline has to come from `dbt compile`, not `dbt parse` |
+| nothing at all could be estimated | usually an unbuilt dev schema, the wrong `--project`, or a deferred build that never ran |
+
+If it is expected for a particular model — an external table your service account
+cannot see, say — accept it by name with `exclude:`. To stop blocking entirely,
+`fail_on: never` still reports everything and exits 0.
+
+One case fails whatever your thresholds are: a run where **every** selected model
+failed to estimate. `PASS` there does not mean the gate checked and found nothing
+wrong; it means the gate never ran.
+
+## Deleted models
+
+A model in the baseline and gone from the branch is reported as the saving it is:
+tagged `deleted`, priced from its baseline scan, and counted in the net line. It
+is never gated — a removal cannot raise cost.
+
+This needs a baseline. On the local (zero-setup) path there is no compiled SQL
+for a file that no longer exists, so a deletion cannot be priced there.
 
 ## GitHub Action
 
