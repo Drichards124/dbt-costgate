@@ -30,8 +30,16 @@ English, ten minutes, no prior context assumed.
 </div>
 
 > [!NOTE]
-> **Working MVP.** `dbt-costgate check` and the **GitHub Action** are implemented and
-> tested. Every report shown here is **generated from the real renderers** by
+> **MVP — feature-complete, not yet battle-tested.** Everything on the
+> [roadmap](#roadmap) ships: the CLI, the GitHub Action, a pre-commit hook, a
+> published container image, and config scaffolding. What it has not had is
+> mileage across many real projects, which is the only thing that finds the last
+> class of bug. **If it does something wrong or confusing, that is worth a
+> [bug report](https://github.com/Drichards124/dbt-costgate/issues/new/choose)** —
+> including "the number looks wrong", which is the most useful report this tool
+> can get.
+>
+> Every report shown here is **generated from the real renderers** by
 > `scripts/gen_samples.py`, and CI fails if any of them drifts from what the code
 > actually produces — the figures are illustrative, the output is not. See the
 > [usage guide](docs/usage.md) and [changelog](CHANGELOG.md).
@@ -209,6 +217,9 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 
 ## Roadmap
 
+**The MVP roadmap is complete** — every item below ships as of
+[v0.9.0](https://github.com/Drichards124/dbt-costgate/releases/latest).
+
 - [x] **`dbt-costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [x] **One-command local diff** — `dbt-costgate check --against main` (isolated git worktree)
 - [x] **GitHub Action** wrapper with a sticky PR comment
@@ -217,6 +228,14 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **`pre-commit` hook** — catch it on your own machine, at pre-push
 - [x] **Docker image** — for CI that isn't GitHub Actions; build it yourself, or
 - [x] **pull the published image** — `ghcr.io/drichards124/dbt-costgate:v0.9.0`, pushed on every release
+
+**What's next is not another feature.** The list above was written before anyone
+had run this against a real warehouse for a month. The useful next step is use —
+finding where the numbers, the defaults or the docs are wrong — and the next
+features should be the ones that use actually asks for, rather than the ones that
+looked obvious from here. Two places that already know what they don't do:
+[when the number can be wrong](docs/explained.md#when-the-number-can-be-wrong)
+and the non-goals below.
 
 ## Non-goals
 
