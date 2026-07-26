@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """What a wrong `.dbt-costgate.yml` does.
 
-The config file is the only surface a user edits by hand, and it is the only one
-argparse does not validate. Every case below was reproduced against the packaged
-CLI with a real dbt project; the ones marked xfail are confirmed defects and the
-assertion states the behaviour we want, not the behaviour we have.
-
-Two failure shapes recur:
+The config file is the only surface a user edits by hand, and it was the only one
+nothing validated. Every case below was reproduced against the packaged CLI with
+a real dbt project, and each one used to fail in one of two ways:
 
 * **Wrong type** -> an uncaught `ValueError`/`AttributeError`/`yaml` error, which
   Python turns into exit **1**. ADR-0008 reserves 1 for "a threshold was
-  breached", so CI reports a YAML typo to the team as a cost regression.
-* **Wrong value** -> silently ignored, so the setting the user wrote does
-  nothing and nothing says so.
+  breached", so CI reported a YAML typo to the team as a cost regression.
+* **Wrong value** -> silently ignored, so the setting the user wrote did nothing
+  and nothing said so.
+
+Both now end at exit 2 with a message naming the key. The tests stayed as they
+were written — asserting the behaviour we wanted — and the `xfail` markers came
+off as the fixes landed.
 """
 
 import json
@@ -21,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeDryRunner, make_manifest, make_node, write_target
+from dbt_costgate.config import CONFIG_REFERENCE, _reject_unknown
 from dbt_costgate.models import TIB
 from dbt_costgate.policy import EXIT_OPERATIONAL
 
@@ -63,7 +65,7 @@ def _run(tmp_path: Path, config_text: str, *args, runner=None):
 
 
 # --------------------------------------------------------------------------
-# Wrong type: currently a traceback and exit 1.
+# Wrong type.
 # --------------------------------------------------------------------------
 
 BAD_TYPES = [
@@ -101,15 +103,10 @@ def test_a_malformed_config_names_the_file_it_could_not_read(
 
 
 # --------------------------------------------------------------------------
-# Wrong value: currently silent.
+# Wrong value.
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F11: config.py:104 does list(str), so a scalar becomes one entry per "
-    "character and the exclusion silently does nothing",
-)
 def test_a_scalar_exclude_excludes_that_model(tmp_path: Path, capsys):
     _run(tmp_path, "exclude: fct_orders\n", "--format", "json")
     payload = json.loads(capsys.readouterr().out)
@@ -117,44 +114,60 @@ def test_a_scalar_exclude_excludes_that_model(tmp_path: Path, capsys):
     assert model["gateable"] is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F11: a scalar warn_only is ignored, so the model the user asked to be "
-    "warn-only still blocks the build",
-)
 def test_a_scalar_warn_only_does_not_block(tmp_path: Path):
     code = _run(tmp_path, "warn_only: fct_orders\nthresholds:\n  max_usd_increase_per_run: 1.0\n")
     assert code == 0
 
 
 @pytest.mark.parametrize("value", ["no", "yes", "true", "off", "FAIL", "warning"])
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F12: fail_on is taken raw from YAML; `no` parses as False, matches "
-    "neither 'never' nor 'warn', and falls through to the strictest setting",
-)
 def test_an_invalid_fail_on_is_rejected(tmp_path: Path, value: str):
     config = f"fail_on: {value}\nthresholds:\n  max_usd_increase_per_run: 1.0\n"
     assert _run(tmp_path, config) == EXIT_OPERATIONAL
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F13: an unknown report.format falls through report.render to terminal",
-)
 def test_an_unknown_report_format_is_rejected(tmp_path: Path):
     assert _run(tmp_path, "report:\n  format: markdwn\n") == EXIT_OPERATIONAL
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F10: unknown keys are ignored, so `max_usd_totl` silently disables the "
-    "threshold the user believes they configured",
-)
 def test_a_misspelled_threshold_key_is_reported(tmp_path: Path, capsys):
     _run(tmp_path, "thresholds:\n  max_usd_totl: 0.01\n")
     captured = capsys.readouterr()
     assert "max_usd_totl" in captured.err
+    assert "thresholds.max_usd_total" in captured.err, "a near miss should name its own fix"
+
+
+def test_an_unknown_top_level_key_is_reported(tmp_path: Path, capsys):
+    assert _run(tmp_path, "maximum_cost: 5\n") == EXIT_OPERATIONAL
+    assert "maximum_cost" in capsys.readouterr().err
+
+
+def test_the_keys_the_validator_accepts_come_from_the_registry():
+    """`CONFIG_REFERENCE` is what `dbt-costgate config` prints and what `init`
+    generates. If the validator kept a second list, a key could be documented and
+    rejected, or accepted and undocumented — so it is derived, and this is the
+    test that says so."""
+    for field in CONFIG_REFERENCE:
+        head, _, leaf = field.key.rpartition(".")
+        raw = {head: {leaf: None}} if head else {field.key: None}
+        _reject_unknown(raw)  # must not raise for anything the registry documents
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        "pricing:\n  regions:\n    europe-west3: 4.8\n",
+        "run_frequency:\n  models:\n    fct_orders: 24\n",
+        "renames:\n  fct_orders: fct_orders_old\n",
+        "baselines:\n  main:\n    against: main\n",
+    ],
+)
+def test_the_contents_of_an_open_map_are_not_mistaken_for_settings(
+    tmp_path: Path, capsys, config_text
+):
+    """A region name, a model name and a baseline name are user data. Checking
+    them against the registry would reject every real project."""
+    _run(tmp_path, config_text)
+    assert "unknown setting" not in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

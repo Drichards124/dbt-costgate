@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import difflib
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -118,36 +119,137 @@ class Config:
 
     @classmethod
     def _from_dict(cls, raw: dict) -> Config:
-        pricing = raw.get("pricing") or {}
-        thr = raw.get("thresholds") or {}
-        freq = raw.get("run_frequency") or {}
-        report = raw.get("report") or {}
+        _reject_unknown(raw)
+        pricing = _section(raw, "pricing")
+        thr = _section(raw, "thresholds")
+        freq = _section(raw, "run_frequency")
+        report = _section(raw, "report")
+        notices = _section(raw, "notices")
         return cls(
             region=pricing.get("region"),
-            usd_per_tib=_opt_float(pricing.get("usd_per_tib")),
+            usd_per_tib=_opt_float(pricing.get("usd_per_tib"), "pricing.usd_per_tib"),
             pricing_regions=_region_rates(pricing.get("regions")),
             currency=_opt_currency(pricing.get("currency")),
             thresholds=Thresholds(
-                max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
-                max_pct_increase=_opt_float(thr.get("max_pct_increase")),
-                max_usd_increase_per_month=_opt_float(thr.get("max_usd_increase_per_month")),
-                max_usd_total=_opt_float(thr.get("max_usd_total")),
-                max_tib_total=_opt_float(thr.get("max_tib_total")),
+                **{
+                    name: _opt_float(thr.get(name), f"thresholds.{name}")
+                    for name in _THRESHOLD_KEYS
+                }
             ),
-            run_frequency_default=_opt_int(freq.get("default")),
-            run_frequency_models={k: int(v) for k, v in (freq.get("models") or {}).items()},
-            exclude=list(raw.get("exclude") or []),
-            warn_only=list(raw.get("warn_only") or []),
-            renames={str(k): str(v) for k, v in (raw.get("renames") or {}).items()},
+            run_frequency_default=_opt_int(freq.get("default"), "run_frequency.default"),
+            run_frequency_models={
+                str(k): _req_int(v, f"run_frequency.models[{k!r}]")
+                for k, v in _mapping(freq.get("models"), "run_frequency.models").items()
+            },
+            exclude=_as_list(raw.get("exclude"), "exclude"),
+            warn_only=_as_list(raw.get("warn_only"), "warn_only"),
+            renames={str(k): str(v) for k, v in _mapping(raw.get("renames"), "renames").items()},
             baselines=_baseline_targets(raw.get("baselines")),
             default_baseline=raw.get("default_baseline"),
-            report_format=report.get("format", "terminal"),
-            fail_on=raw.get("fail_on", "fail"),
-            silence_notices=[str(n) for n in ((raw.get("notices") or {}).get("silence") or [])],
+            report_format=_one_of(
+                report.get("format"), _REPORT_FORMATS, "report.format", "terminal"
+            ),
+            fail_on=_one_of(raw.get("fail_on"), _FAIL_ON, "fail_on", "fail"),
+            silence_notices=_as_list(notices.get("silence"), "notices.silence"),
         )
 
     def runs_per_month(self, model_name: str) -> int | None:
         return self.run_frequency_models.get(model_name, self.run_frequency_default)
+
+
+# The allowed values for the two enum-ish settings. argparse validates the
+# equivalent flags from `choices=`; the file had nothing checking it at all, so
+# `report.format: markdwn` printed terminal output and said nothing, and
+# `fail_on: no` — YAML for the boolean False — matched neither "never" nor "warn"
+# and fell through to the strictest setting a user could have chosen.
+_FAIL_ON = ("never", "warn", "fail")
+_REPORT_FORMATS = ("terminal", "markdown", "json")
+
+# Derived, not written out again: a threshold added to the dataclass and not to a
+# hand-kept list here would parse as absent, which is a threshold the user
+# configured and the gate never applied.
+_THRESHOLD_KEYS = tuple(f.name for f in fields(Thresholds))
+
+
+def _reject_unknown(raw: dict) -> None:
+    """Refuse a key `CONFIG_REFERENCE` does not describe.
+
+    An unknown key used to be dropped in silence, so `thresholds.max_usd_totl`
+    left the gate with no threshold at all while the user believed they had
+    configured one — the failure mode a cost gate can least afford, because
+    nothing about the run looks wrong.
+
+    Checked one level deep. A key that heads a documented section
+    (`pricing`, `thresholds`, …) has its children checked; anything else is
+    matched whole. That is what keeps the values of an open map — a region name
+    under `pricing.regions`, a model name under `renames` — as the user data they
+    are rather than settings to be recognised.
+    """
+    known = {f.key for f in CONFIG_REFERENCE}
+    sections = {key.rpartition(".")[0] for key in known if "." in key}
+    for key, value in raw.items():
+        name = str(key)
+        if name in sections and isinstance(value, dict):
+            for child in value:
+                _reject_one(f"{name}.{child}", known)
+        elif name not in sections:
+            _reject_one(name, known)
+
+
+def _reject_one(key: str, known: set[str]) -> None:
+    if key in known:
+        return
+    close = difflib.get_close_matches(key, sorted(known), n=1, cutoff=0.6)
+    hint = f" Did you mean `{close[0]}`?" if close else ""
+    raise ConfigError(
+        f"unknown setting `{key}`.{hint} Run `dbt-costgate config` for every key it accepts."
+    )
+
+
+def _section(raw: dict, key: str) -> dict:
+    return _mapping(raw.get(key), key)
+
+
+def _mapping(value, key: str) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"{key}: expected a mapping of settings, got {type(value).__name__}. "
+            f"Its entries belong on indented lines under `{key}:`."
+        )
+    return value
+
+
+def _as_list(raw, key: str) -> list[str]:
+    """A list of names, accepting a bare scalar as a one-item list.
+
+    A string is iterable, so `list("dim_orders")` is a list of eleven single
+    characters — which matched no model, leaving `exclude: dim_orders` doing
+    nothing and `warn_only: dim_orders` blocking the build the user had asked it
+    only to warn about.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        raise ConfigError(f"{key}: expected a list of names, got a mapping.")
+    if isinstance(raw, (str, int, float, bool)):
+        return [str(raw)]
+    return [str(item) for item in raw]
+
+
+def _one_of(raw, allowed: tuple[str, ...], key: str, default: str) -> str:
+    if raw is None:
+        return default
+    if str(raw) in allowed:
+        return str(raw)
+    note = ""
+    if isinstance(raw, bool):
+        # `no`, `yes`, `on` and `off` are all YAML booleans when unquoted, so they
+        # arrive here as True/False and never match a setting name. Worth naming,
+        # because the value the user typed is not the value in the error.
+        note = " — YAML reads an unquoted yes/no/on/off as a boolean, not as a word"
+    raise ConfigError(f"{key}: expected one of {', '.join(allowed)}, got {raw!r}{note}.")
 
 
 def _opt_currency(raw) -> str | None:
@@ -162,7 +264,7 @@ def _opt_currency(raw) -> str | None:
         return None
     code = str(raw).strip().upper()
     if not (len(code) == 3 and code.isalpha()):
-        raise ValueError(
+        raise ConfigError(
             f"pricing.currency: expected a three-letter ISO 4217 code such as USD or EUR, "
             f"got {raw!r}"
         )
@@ -173,10 +275,11 @@ def _region_rates(raw) -> dict[str, float]:
     """Parse a `pricing.regions` map. A rate may be 0 (flat-rate slots), but a
     negative rate is nonsense and would silently subtract cost."""
     rates: dict[str, float] = {}
-    for region, value in (raw or {}).items():
-        rate = float(value)
+    for region, value in _mapping(raw, "pricing.regions").items():
+        key = f"pricing.regions[{region!r}]"
+        rate = _req_float(value, key)
         if rate < 0:
-            raise ValueError(f"pricing.regions[{region!r}]: rate must be >= 0, got {rate}")
+            raise ConfigError(f"{key}: rate must be >= 0, got {rate}")
         rates[region] = rate
     return rates
 
@@ -185,18 +288,32 @@ def _baseline_targets(raw) -> dict[str, BaselineTarget]:
     """Parse a `baselines:` map (name -> {manifest|against}). Non-dict entries
     become empty targets; the cli reports the one-of violation when selected."""
     out: dict[str, BaselineTarget] = {}
-    for name, spec in (raw or {}).items():
+    for name, spec in _mapping(raw, "baselines").items():
         spec = spec if isinstance(spec, dict) else {}
         out[str(name)] = BaselineTarget(manifest=spec.get("manifest"), against=spec.get("against"))
     return out
 
 
-def _opt_float(v) -> float | None:
-    return None if v is None else float(v)
+def _opt_float(v, key: str) -> float | None:
+    return None if v is None else _req_float(v, key)
 
 
-def _opt_int(v) -> int | None:
-    return None if v is None else int(v)
+def _opt_int(v, key: str) -> int | None:
+    return None if v is None else _req_int(v, key)
+
+
+def _req_float(v, key: str) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{key}: expected a number, got {v!r}") from exc
+
+
+def _req_int(v, key: str) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{key}: expected a whole number, got {v!r}") from exc
 
 
 @dataclass(frozen=True)
