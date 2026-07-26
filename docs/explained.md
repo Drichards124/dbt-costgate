@@ -103,6 +103,11 @@ mean waiting on BigQuery all day — so an expensive change gets caught before i
 becomes anyone else's review. See the
 [usage guide](usage.md#pre-commit-hook).
 
+**On CI that isn't GitHub Actions.** There's a `Dockerfile`. Build it, mount your
+project, and the check runs the same way — the exit code is the whole
+integration, so GitLab, Jenkins or anything else needs no special support. See
+the [usage guide](usage.md#docker-and-ci-that-isnt-github-actions).
+
 There is also a middle option, `dbt-costgate check --against main`, which produces
 the baseline for you by checking `main` out into a throwaway git worktree and
 compiling it there. Two things to know about it: it reuses your already-installed

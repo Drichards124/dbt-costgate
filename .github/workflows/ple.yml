@@ -55,15 +55,49 @@ jobs:
           /tmp/smoke/bin/dbt-costgate --version
           /tmp/smoke/bin/python -c "import dbt_costgate; print(dbt_costgate.__version__)"
 
+  # The container image is a packaged artifact too, in a different format. It is
+  # built and run here rather than only on the release path, so a broken
+  # Dockerfile fails on the way to main instead of at the tag.
+  container-image-smoke:
+    name: Container image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build -t dbt-costgate:ci .
+
+      - name: The image must report the version this source tree declares
+        run: |
+          want="$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/dbt_costgate/__init__.py').read_text()).group(1))")"
+          got="$(docker run --rm dbt-costgate:ci --version)"
+          if [ "$got" != "dbt-costgate $want" ]; then
+            echo "Image reports '$got', source declares version $want."
+            exit 1
+          fi
+          echo "Image reports $got."
+
+      - name: It must carry its packaged data and run as a non-root user
+        run: |
+          # `config` reads the bundled pricing table through importlib.resources,
+          # so an image missing the package data fails here rather than on
+          # somebody's first run.
+          docker run --rm dbt-costgate:ci config --format json > /dev/null
+          uid="$(docker run --rm --entrypoint id dbt-costgate:ci -u)"
+          if [ "$uid" = "0" ]; then
+            echo "The image runs as root."
+            exit 1
+          fi
+          echo "Runs as uid $uid with its packaged data intact."
+
   ple-gate:
     name: PLE gate
     runs-on: ubuntu-latest
-    needs: [py-matrix, packaged-artifact-smoke]
+    needs: [py-matrix, packaged-artifact-smoke, container-image-smoke]
     if: always()
     steps:
       - name: Require all PLE jobs to have succeeded
         run: |
-          if [ "${{ needs.py-matrix.result }}" != "success" ] || [ "${{ needs.packaged-artifact-smoke.result }}" != "success" ]; then
+          if [ "${{ needs.py-matrix.result }}" != "success" ] || [ "${{ needs.packaged-artifact-smoke.result }}" != "success" ] || [ "${{ needs.container-image-smoke.result }}" != "success" ]; then
             echo "One or more PLE jobs did not succeed."
             exit 1
           fi

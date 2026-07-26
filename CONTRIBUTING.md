@@ -69,6 +69,14 @@ is not enough):
 ruff check . && ruff format --check .
 ```
 
+If you touch the `Dockerfile`, build and run it — the test suite cannot. CI does
+the same on every push to `ple`, and additionally checks that the image is not
+running as root:
+
+```bash
+docker build -t dbt-costgate . && docker run --rm dbt-costgate --version
+```
+
 ## If you change what a report looks like
 
 Every example report in `README.md` and `docs/usage.md` is generated from the real

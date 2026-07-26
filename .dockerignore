@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build stage needs pyproject.toml, README.md (the package's declared
+# readme) and src/. Everything below is either irrelevant to a wheel build or
+# something that should never end up in a build context.
+
+.git/
+.github/
+.venv/
+venv/
+docs/
+tests/
+scripts/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+dist/
+build/
+*.egg-info/
+coverage/
+.coverage
+
+.env
+.env.*
+.DS_Store
+*.log
