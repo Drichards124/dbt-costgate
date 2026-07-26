@@ -23,8 +23,11 @@ class _Git:
     project_dir: Path
 
     def run(self, *args: str) -> str:
-        proc = subprocess.run(
-            ["git", *args],
+        # S603/S607: passed as a list, so there is no shell to inject into; `git`
+        # is looked up on PATH on purpose, as an absolute path would break every
+        # non-standard install.
+        proc = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
             cwd=self.project_dir,
             capture_output=True,
             text=True,
