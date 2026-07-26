@@ -441,7 +441,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/dbt-costgate@v0.8.0
+      - uses: Drichards124/dbt-costgate@v0.9.0
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .dbt-costgate.yml
@@ -471,7 +471,7 @@ turns it into someone else's review problem.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/Drichards124/dbt-costgate
-    rev: v0.8.0
+    rev: v0.9.0
     hooks:
       - id: dbt-costgate
 ```
@@ -514,12 +514,21 @@ The repository ships a `Dockerfile`, so teams on GitLab CI, Buildkite, Jenkins o
 anything else can run the same check without a Python environment of their own.
 
 ```bash
+docker pull ghcr.io/drichards124/dbt-costgate:v0.9.0
+docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v0.9.0 check
+```
+
+Every release publishes `ghcr.io/drichards124/dbt-costgate` at both `:vX.Y.Z` and
+`:latest`. **Pin the version tag** — `:latest` moves under you, which is the one
+thing you do not want from the job that decides whether a pull request merges.
+
+Building it yourself works just as well, and is the answer if you would rather
+not depend on a registry at all:
+
+```bash
 docker build -t dbt-costgate .
 docker run --rm -v "$PWD:/workspace" dbt-costgate check
 ```
-
-> A published image on `ghcr.io` is wired up but **not switched on yet** — build
-> it yourself, or push it to your own registry, until it lands.
 
 The image contains dbt-costgate and nothing else. It does **not** contain dbt: it
 estimates cost, it doesn't build your project, so compile in whatever image you
