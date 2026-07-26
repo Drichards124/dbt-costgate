@@ -128,6 +128,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A baseline with no compiled SQL is no longer reported as a basis mismatch.**
+  When the baseline manifest had no compiled code for a model, it was still
+  assigned a query shape — and if your branch happened to compile to the other
+  one, the report said:
+
+  ```text
+  ⚠ mixed basis — baseline is full_refresh, current is incremental_form;
+    recompile the baseline the same way
+  ```
+
+  naming a shape for SQL that was never compiled, directly beside the warning
+  saying the baseline had no compiled SQL at all. Recompiling could not fix it,
+  because the mismatch was not real.
+
+  Such a model is still reported and still **not gated** — with no baseline
+  bytes, the whole current scan reads as an increase, and a threshold firing on
+  that is firing on a missing measurement rather than a regression. That
+  outcome is now decided where the missing baseline is detected. Previously it
+  fell out of the bogus mismatch, which meant it only applied when your branch
+  compiled to the *other* shape: the same missing baseline gated or did not gate
+  depending on something unrelated to it. If you have such a model, expect the
+  spurious `mixed basis` line to disappear and the gating to stay off in cases
+  where it was previously inconsistent.
+
+  Unestimated rows also no longer carry a `full-refresh` / `incremental` tag,
+  and `models[].basis` is `null` for them in JSON — there is no figure for a
+  basis to describe.
+
 - **An incremental model compiled against its existing table is no longer
   labelled `full-refresh`.** An incremental has two prices — the cost to rebuild
   the table, and the cost of one run against the table as it already stands —

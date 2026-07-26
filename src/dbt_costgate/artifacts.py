@@ -254,13 +254,28 @@ def touches_project_config(paths: list[str]) -> bool:
     return any(p == "dbt_project.yml" for p in paths)
 
 
-def detect_basis(node: ModelNode, sql: str | None) -> EstimateBasis:
-    """A self-reference in an incremental model's compiled SQL means it was
-    compiled against an existing table (incremental form); its absence means the
-    full-refresh form. Non-incrementals are always direct."""
+def detect_basis(node: ModelNode, sql: str | None) -> EstimateBasis | None:
+    """Which query shape this SQL is, or None when there is no SQL to judge.
+
+    A self-reference in an incremental model's compiled SQL means it was compiled
+    against an existing table (incremental form); its absence means the
+    full-refresh form. Non-incrementals are always direct.
+
+    The no-SQL case returns None rather than falling through to a basis. A basis
+    describes a measurement, so with nothing compiled there is nothing to
+    describe: answering `full_refresh` there named a shape for SQL that does not
+    exist, which then reached a reader as a row tag on an unestimated model and,
+    worse, as a `mixed basis — baseline is full_refresh` warning about a baseline
+    that was never compiled at all.
+
+    The check comes first, ahead of the non-incremental branch, for the same
+    reason — "nothing was measured" outranks "this is a table".
+    """
+    if not sql:
+        return None
     if not node.is_incremental:
         return EstimateBasis.DIRECT
-    if sql and node.relation_name and node.relation_name in sql:
+    if node.relation_name and node.relation_name in sql:
         return EstimateBasis.INCREMENTAL_FORM
     return EstimateBasis.FULL_REFRESH
 

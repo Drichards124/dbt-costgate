@@ -109,3 +109,82 @@ def test_build_deltas_applies_exclude():
     deltas = estimate.build_deltas(ests, PricingTable.load(), cfg)
     assert not deltas[0].gateable
     assert any("excluded" in w for w in deltas[0].warnings)
+
+
+def _no_compiled_code(spec):
+    """A manifest node whose `compiled_code` really is null.
+
+    `make_node(compiled_code=None)` cannot express this — None is its default and
+    falls back to generated SQL, so asking for it yields an ordinary node and a
+    test that quietly exercises a different case. Overridden on the dict instead.
+    """
+    uid, node = spec
+    node["compiled_code"] = None
+    return uid, node
+
+
+def _baseline_without_compiled_sql(current_sql: str):
+    """An incremental whose baseline node exists but carries no compiled code —
+    a manifest built without the compile step, or trimmed of it."""
+    current = _nodes(
+        make_node(
+            "inc",
+            materialized="incremental",
+            compiled_code=current_sql,
+            relation_name="`proj`.`analytics`.`inc`",
+            checksum="new",
+        )
+    )
+    baseline = _nodes(
+        _no_compiled_code(
+            make_node(
+                "inc",
+                materialized="incremental",
+                relation_name="`proj`.`analytics`.`inc`",
+                checksum="old",
+            )
+        )
+    )
+    runner = FakeDryRunner({current_sql: 2 * TIB})
+    return estimate.estimate_models(
+        ["model.pkg.inc"], current, baseline, runner, current_dir=None, diff_mode=True
+    )[0]
+
+
+def test_a_baseline_with_no_compiled_sql_is_not_given_a_basis():
+    """It was handed `full_refresh` — a shape named for SQL that does not exist.
+    Not a silent internal default: it reached the user as
+    `mixed basis — baseline is full_refresh`, a specific claim about a baseline
+    that was never compiled, printed beside the warning saying exactly that."""
+    est = _baseline_without_compiled_sql("select * from `proj`.`analytics`.`inc`")
+    assert est.basis_baseline is None
+    assert not est.basis_mismatch
+    assert any("baseline has no compiled SQL" in w for w in est.warnings)
+    assert not any("mixed basis" in w for w in est.warnings)
+
+
+def test_a_missing_baseline_gates_the_same_way_whichever_shape_the_branch_compiled():
+    """The bug this pins. `gateable` used to fall out of the basis-mismatch
+    branch, so an absent baseline cleared it only when the *current* side came out
+    incremental-form — the same missing baseline gating or not depending on how
+    the branch happened to compile. Both shapes, one answer."""
+    incremental_form = _baseline_without_compiled_sql("select * from `proj`.`analytics`.`inc`")
+    full_refresh = _baseline_without_compiled_sql("select * from upstream")
+    # Guards the premise: if both compiled to the same shape this would pass
+    # while comparing nothing.
+    assert incremental_form.basis_current != full_refresh.basis_current
+    assert not incremental_form.gateable
+    assert not full_refresh.gateable
+
+
+def test_an_unestimated_model_carries_no_basis_to_label():
+    """No compiled SQL on the *current* side either — nothing was dry-run, so
+    there is no figure for a basis to describe."""
+    current = _nodes(_no_compiled_code(make_node("inc", materialized="incremental")))
+    ests = estimate.estimate_models(
+        ["model.pkg.inc"], current, {}, FakeDryRunner({}), current_dir=None, diff_mode=False
+    )
+    assert ests[0].basis_current is None
+    delta = estimate.build_deltas(ests, PricingTable.load(), Config())[0]
+    assert delta.basis is None
+    assert delta.is_incremental  # the model is still incremental; the figure is absent
