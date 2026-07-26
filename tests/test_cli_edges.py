@@ -229,11 +229,6 @@ def test_deleting_a_model_is_reported_as_a_saving(tmp_path: Path, capsys):
     assert any(m["name"] == "dropped_expensive" for m in payload["models"])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F22: cli.py:430 writes the report unguarded, so an unwritable path "
-    "throws away a completed run as a traceback and exits 1",
-)
 def test_an_unwritable_output_path_exits_operational(tmp_path: Path):
     target = write_target(tmp_path, make_manifest(make_node("m", compiled_code="SQL")))
     code = main(

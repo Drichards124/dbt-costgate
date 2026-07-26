@@ -77,22 +77,27 @@ BAD_TYPES = [
 
 
 @pytest.mark.parametrize("config_text", BAD_TYPES)
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F09: config errors escape cli.run_check as a traceback and exit 1; "
-    "ADR-0008 reserves 1 for a threshold breach and 2 for 'could not run'",
-)
 def test_a_malformed_config_exits_operational_not_gate_failed(tmp_path: Path, config_text: str):
     assert _run(tmp_path, config_text) == EXIT_OPERATIONAL
 
 
 @pytest.mark.parametrize("config_text", BAD_TYPES)
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F09: the user is shown a Python stack trace naming site-packages paths",
-)
 def test_a_malformed_config_does_not_raise(tmp_path: Path, config_text: str):
     _run(tmp_path, config_text)
+
+
+@pytest.mark.parametrize("config_text", BAD_TYPES)
+def test_a_malformed_config_names_the_file_it_could_not_read(
+    tmp_path: Path, capsys, config_text: str
+):
+    """A user with several discoverable config files needs to know which one the
+    complaint is about, and a message that opens `dbt-costgate:` is the one thing
+    that says this is the tool talking rather than Python."""
+    _run(tmp_path, config_text)
+    err = capsys.readouterr().err
+    assert err.startswith("dbt-costgate: ")
+    assert "costgate.yml" in err
+    assert "Traceback" not in err
 
 
 # --------------------------------------------------------------------------

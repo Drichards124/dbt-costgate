@@ -11,6 +11,22 @@ from typing import Any
 import yaml
 
 
+class ConfigError(Exception):
+    """A `.dbt-costgate.yml` the tool will not act on, reported as exit 2.
+
+    Every way of getting the file wrong used to escape as whatever Python raised
+    — `ValueError` for a threshold written as prose, `AttributeError` for a list
+    where a mapping belongs, a yaml scanner error for a stray colon — and an
+    uncaught exception exits 1. ADR-0008 reserves 1 for "a threshold was
+    breached", so CI told the team a typo was a cost regression and blamed the
+    author for it.
+
+    One type, raised at every such point, so `cli` has a single thing to catch
+    and every config mistake lands on the documented exit 2 with a message that
+    names the file.
+    """
+
+
 @dataclass
 class Thresholds:
     max_usd_increase_per_run: float | None = None
@@ -78,8 +94,27 @@ class Config:
                     break
         if cfg_path is None or not cfg_path.is_file():
             return cls()
-        raw = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
-        return cls._from_dict(raw)
+        try:
+            raw = yaml.safe_load(cfg_path.read_text("utf-8"))
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"{cfg_path} is not valid YAML: {exc}") from exc
+        except OSError as exc:
+            raise ConfigError(f"{cfg_path} could not be read: {exc}") from exc
+        if raw is None:
+            return cls()
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"{cfg_path}: expected a mapping of settings at the top level, "
+                f"got {type(raw).__name__}. Run `dbt-costgate config` for the key list."
+            )
+        try:
+            return cls._from_dict(raw)
+        except ConfigError as exc:
+            # Re-raised with the path in front: the parser knows which key is
+            # wrong and not which of several discoverable files it came from.
+            raise ConfigError(f"{cfg_path}: {exc}") from exc
+        except (ValueError, TypeError, AttributeError, KeyError) as exc:
+            raise ConfigError(f"{cfg_path}: {exc}") from exc
 
     @classmethod
     def _from_dict(cls, raw: dict) -> Config:

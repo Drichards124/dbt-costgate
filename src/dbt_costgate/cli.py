@@ -22,7 +22,7 @@ from dbt_costgate import (
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
-from dbt_costgate.config import CONFIG_REFERENCE, Config, render_config_template
+from dbt_costgate.config import CONFIG_REFERENCE, Config, ConfigError, render_config_template
 from dbt_costgate.gitdiff import GitDiffError
 from dbt_costgate.models import PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
@@ -315,8 +315,12 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             )
             return policy.EXIT_OPERATIONAL
 
-    config = Config.load(Path(args.config) if args.config else None, project_dir)
-    config = _apply_overrides(config, args)
+    try:
+        config = Config.load(Path(args.config) if args.config else None, project_dir)
+        config = _apply_overrides(config, args)
+    except ConfigError as exc:
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
 
     # Resolve the baseline source: an explicit --baseline/--against, else a named
     # --baseline-target / config default_baseline (each a manifest path or a git ref).
@@ -453,7 +457,18 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         color=not to_file and layout.should_color(args.color, sys.stdout),
     )
     if to_file:
-        Path(args.output).write_text(rendered + "\n", "utf-8")
+        try:
+            Path(args.output).write_text(rendered + "\n", "utf-8")
+        except OSError as exc:
+            # Every dry-run succeeded and the report rendered; only the write
+            # failed. That is the gate's own plumbing, not a cost regression, so
+            # it exits 2 — unguarded it threw a completed run away as a traceback
+            # and exit 1, which CI reads as "the author broke something".
+            print(
+                f"dbt-costgate: could not write the report to {args.output}: {exc}",
+                file=sys.stderr,
+            )
+            return policy.EXIT_OPERATIONAL
     else:
         print(rendered)
     return verdict.exit_code
