@@ -57,8 +57,9 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
   GATE: PASS
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing
@@ -122,8 +123,9 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: +264% exceeds 25%
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing
@@ -272,8 +274,9 @@ dbt-costgate — region: US · on-demand USD 4.10/TiB · user override
     - fct_orders_daily: +264% exceeds 25%
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   Pricing: US USD 4.10/TiB · user override (table 2026.07, verified 2026-07-25)
   Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing
@@ -301,8 +304,9 @@ dbt-costgate — region: US · bytes only (no per-byte price configured)
     - fct_orders_daily: +264% exceeds 25%
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only.
     Slot/capacity cost cannot be estimated before a query runs.
@@ -330,8 +334,9 @@ dbt-costgate — region: US · bytes only (no per-byte price configured)
     - fct_orders_daily: +264% exceeds 25%
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   ⚠ dead-money-thresholds  thresholds.max_usd_increase_per_run cannot fire: no per-byte price is
                            configured, so every cost on this run is 0.00 and no dollar figure can
@@ -728,8 +733,9 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
   GATE: PASS
 
   NOTES
-    ⚠ incremental — for the rows tagged above, the figure is one run against the table as already
-      built, so it does not gate rebuild cost.
+    ⚠ incremental — rows tagged incremental show one run against a table that already exists. A full
+      rebuild scans far more, and nothing here measures it, so no threshold on this report can catch
+      a rebuild getting expensive.
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing

@@ -189,8 +189,9 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: +264% exceeds 25%
 
   NOTES
-    ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not
-      of one incremental run.
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
 
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
   Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing

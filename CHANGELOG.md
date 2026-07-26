@@ -98,6 +98,17 @@ could not check a model now fails instead of passing, and that is deliberate.
 - **Unpriced (slot-priced) reports are ordered by size.** With every rate at 0
   the sort had nothing to work with and rows came out in arrival order.
 
+- **The `incremental` and `full-refresh` footnotes say which figure is the big
+  one.** Every fact in the old wording was correct — "the figure is one run
+  against the table as already built, so it does not gate rebuild cost" — and it
+  took a second read to work out that the number on screen is the cheap case and
+  the expensive one is not in the report at all. Each now says what the figure
+  is, what it is not, and which of the two is larger, in that order:
+
+  > incremental — rows tagged incremental show one run against a table that
+  > already exists. A full rebuild scans far more, and nothing here measures it,
+  > so no threshold on this report can catch a rebuild getting expensive.
+
 ### Added
 
 - **`--color auto|always|never`** (default `auto`): colour when stdout is a

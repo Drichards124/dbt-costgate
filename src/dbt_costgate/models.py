@@ -259,21 +259,29 @@ class BasisLabel:
     footnote: str  # the collapsed explanation a report prints once
 
 
+# Written to be read once. The earlier footnotes said "for the rows tagged above,
+# the figure is one run against the table as already built, so it does not gate
+# rebuild cost" — every fact correct, and it takes a second pass to work out that
+# the number on screen is the cheap case and the expensive one is not here at all.
+# Each footnote below now says what the number is, what it is not, and which of
+# the two is bigger, in that order.
 BASIS_LABELS: dict[EstimateBasis, BasisLabel] = {
     EstimateBasis.FULL_REFRESH: BasisLabel(
         tag="full-refresh",
-        warning="incremental — figure is the full-refresh scan",
+        warning="full-refresh — this figure is a full rebuild, not one incremental run",
         footnote=(
-            "full-refresh — for the rows tagged above, the figure is the cost of "
-            "rebuilding the table, not of one incremental run."
+            "full-refresh — rows tagged full-refresh show what it costs to build the whole "
+            "table from scratch. A normal incremental run scans much less, so read this as "
+            "the ceiling rather than the nightly bill."
         ),
     ),
     EstimateBasis.INCREMENTAL_FORM: BasisLabel(
         tag="incremental",
-        warning="incremental — figure is one incremental run, not a rebuild",
+        warning="incremental — this figure is one incremental run, not a full rebuild",
         footnote=(
-            "incremental — for the rows tagged above, the figure is one run against "
-            "the table as already built, so it does not gate rebuild cost."
+            "incremental — rows tagged incremental show one run against a table that "
+            "already exists. A full rebuild scans far more, and nothing here measures it, "
+            "so no threshold on this report can catch a rebuild getting expensive."
         ),
     ),
 }
