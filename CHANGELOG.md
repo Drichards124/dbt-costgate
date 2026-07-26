@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
-## [Unreleased]
+## [0.9.0] - 2026-07-26
 
 ### Added
 
@@ -31,8 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other discovered names, and takes `--project-dir` when your dbt project is not
   the directory you are standing in.
 
-- **A `Dockerfile`**, so CI that isn't GitHub Actions can run the same check
-  without a Python environment of its own:
+- **A published container image**, so CI that isn't GitHub Actions can run the
+  same check without a Python environment of its own:
+
+  ```bash
+  docker pull ghcr.io/drichards124/dbt-costgate:v0.9.0
+  docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v0.9.0 check
+  ```
+
+  Every release publishes both `:vX.Y.Z` and `:latest`. Pin the version tag —
+  `:latest` moves under you, which is the one thing you do not want from the job
+  that decides whether a pull request merges. The repository also ships the
+  `Dockerfile` itself, so you can build it and push it to your own registry:
 
   ```bash
   docker build -t dbt-costgate .
