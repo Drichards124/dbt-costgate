@@ -130,6 +130,10 @@ That's the entire local setup — no baseline, no CI, no config file. Add a
 baseline and thresholds when you want it to *block* a PR; see the
 [usage guide](docs/usage.md).
 
+When you do want a config file, `dbt-costgate init` writes one documenting every
+setting, all commented out — so it changes nothing until you uncomment
+something.
+
 Every [release](https://github.com/Drichards124/dbt-costgate/releases) also ships a
 wheel, an sdist, and `SHA256SUMS` if you'd rather pin to an artifact.
 
