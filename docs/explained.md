@@ -178,8 +178,9 @@ an unexplained number:
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +52.75/month (4 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
   Net increase: USD 13.19/run · USD 52.82/month
 

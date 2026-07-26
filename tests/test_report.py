@@ -5,6 +5,7 @@ import pytest
 
 from dbt_costgate import report
 from dbt_costgate.models import (
+    INCREMENTAL_BASIS_WARNING,
     CostDelta,
     Notice,
     PricingDisclosure,
@@ -27,7 +28,7 @@ def _report(mode="diff", status=Status.FAIL):
             usd_baseline=0.0004,
             usd_current=18.19,
             region="US",
-            warnings=["incremental — figure is the full-refresh scan"],
+            warnings=[INCREMENTAL_BASIS_WARNING],
             runs_per_month=30,
         ),
         CostDelta(
@@ -405,9 +406,12 @@ def test_notices_render_in_every_format_and_sit_with_the_disclosure():
 def test_absent_notices_add_nothing():
     rep = _report()
     assert rep.notices == []
-    assert "⚠" not in report.render_terminal(rep).replace(
-        "⚠ incremental — figure is the full-refresh scan", ""
-    )
+    # The fixture's incremental model still warns, now as the collapsed footnote.
+    # Asserted as the complete list of ⚠ lines rather than by stripping known
+    # text: a reworded footnote fails here loudly instead of quietly leaving an
+    # assertion that matches nothing.
+    warned = [line for line in report.render_terminal(rep).splitlines() if "⚠" in line]
+    assert warned == [f"  ⚠ {report._INCREMENTAL_FOOTNOTE}"]
     assert json.loads(report.render_json(rep))["notices"] == []
 
 
@@ -477,3 +481,92 @@ def test_both_renderers_carry_the_same_footer_notes():
         ]
         markdown = _md_footer(report.render_markdown(rep))
         assert terminal[-len(markdown) :] == markdown
+
+
+def _incrementals(n: int) -> Report:
+    """n incremental models, every one of them carrying the warning."""
+    deltas = [
+        CostDelta(
+            name=f"fct_{i}",
+            unique_id=f"model.pkg.fct_{i}",
+            is_incremental=True,
+            is_new=False,
+            gateable=True,
+            bytes_baseline=1_000_000,
+            bytes_current=2_000_000,
+            usd_baseline=0.01,
+            usd_current=0.02,
+            region="US",
+            warnings=[INCREMENTAL_BASIS_WARNING],
+        )
+        for i in range(n)
+    ]
+    return Report(
+        deltas=deltas,
+        disclosure=PricingDisclosure(
+            regions={"US": 6.25},
+            source="built-in table",
+            table_version="2026.07",
+            last_verified="2026-07-23",
+        ),
+        verdict=Verdict(status=Status.PASS, breaches=[], exit_code=0),
+        mode="diff",
+    )
+
+
+def test_the_incremental_warning_is_said_once_however_many_rows_carry_it():
+    """It explains what the `full-refresh` tag means, which is the same sentence
+    for every row that has one. Repeated per model it grew with the number of
+    incrementals in the change and pushed the caveats that are about a specific
+    model — a dynamic filter, a missing baseline — under a wall of repeats.
+
+    Both halves are asserted. Counting the footnote alone proves nothing: it is
+    worded differently from the warning it replaces, so it stays at one whether or
+    not the per-row repeats came back beneath it.
+    """
+    for render in (report.render_terminal, report.render_markdown):
+        out = render(_incrementals(4))
+        assert out.count(report._INCREMENTAL_FOOTNOTE) == 1
+        assert INCREMENTAL_BASIS_WARNING not in out
+
+
+def test_every_incremental_row_keeps_its_own_tag():
+    """The footnote replaces the repeated sentence, not the per-row marking. A
+    reader still has to be able to tell *which* rows it is talking about, so
+    collapsing the prose while also dropping the tag would leave the footnote
+    referring to nothing."""
+    rep = _incrementals(4)
+    terminal = report.render_terminal(rep)
+    assert terminal.count("(full-refresh)") == 4
+    assert report.render_markdown(rep).count("_full-refresh_") == 4
+
+
+def test_a_models_own_warnings_still_render_on_its_row():
+    """Only the shared one collapses. A caveat that applies to one model is the
+    reason the warning list exists, and must not be swept into the footnote."""
+    rep = _incrementals(2)
+    rep.deltas[0].warnings.append("dynamic filter — dry-run may be worst-case (overestimate)")
+    assert "  fct_0" in report.render_terminal(rep)
+    assert "      ⚠ dynamic filter" in report.render_terminal(rep)
+    assert "> ⚠ **fct_0** — dynamic filter" in report.render_markdown(rep)
+
+
+def test_no_footnote_when_no_row_carries_the_warning():
+    rep = _incrementals(1)
+    rep.deltas[0].warnings = []
+    for render in (report.render_terminal, report.render_markdown):
+        assert report._INCREMENTAL_FOOTNOTE not in render(rep)
+
+
+def test_the_footnote_follows_the_warning_and_not_the_tag():
+    """The two conditions look interchangeable and are not: `sql_warnings`
+    returns nothing at all for a model with no compiled SQL, so a row can be
+    incremental — and tagged — while never having carried the warning. Keyed on
+    the tag, the footnote would speak for rows the per-row lines never covered,
+    which is a claim about a figure that was never measured."""
+    rep = _incrementals(1)
+    rep.deltas[0].warnings = []
+    assert rep.deltas[0].is_incremental
+    terminal = report.render_terminal(rep)
+    assert "(full-refresh)" in terminal
+    assert report._INCREMENTAL_FOOTNOTE not in terminal

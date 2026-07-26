@@ -50,8 +50,9 @@ each one's current scan cost. No baseline, no CI, no config required:
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 2.91 TiB scanned   USD 18.19/run   USD 545.62/month (30 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers: 411.24 GiB scanned   USD 2.51/run   USD 75.30/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
   GATE: PASS
 
@@ -94,8 +95,9 @@ dbt-costgate check --baseline path/to/main/manifest.json
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +395.63/month (30 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
   Net increase: USD 13.19/run · USD 395.70/month
 
@@ -235,8 +237,9 @@ your rate. Note the source reads `user override`, not `built-in table`:
 dbt-costgate — region: US · on-demand USD 4.10/TiB · user override
 
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +8.65/run   USD +259.53/month (30 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.05/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
   Net increase: USD 8.65/run · USD 259.58/month
 

@@ -130,6 +130,18 @@ class ModelEstimate:
         )
 
 
+# The one warning that says the same thing about every model it lands on: it
+# explains what the `full-refresh` tag on a row means, so a run touching five
+# incremental models printed it five times and buried the warnings that were
+# genuinely about one model. `artifacts.sql_warnings` produces it and `report`
+# collapses it into a single footnote, which means both have to agree on the
+# exact string. It lives here, in the vocabulary both already import, rather
+# than as a literal matched in the renderer: a second copy could drift from this
+# one in silence — the renderer would simply stop recognising it and go back to
+# repeating it per row, with nothing failing to say so.
+INCREMENTAL_BASIS_WARNING = "incremental — figure is the full-refresh scan"
+
+
 @dataclass
 class CostDelta:
     """A priced estimate: the numbers a report renders and the gate evaluates."""
