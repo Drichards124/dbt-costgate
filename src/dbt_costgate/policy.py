@@ -46,9 +46,12 @@ def evaluate(deltas: list[CostDelta], config: Config, currency: str = "USD") -> 
         # unbuilt dev schema, the wrong --project, a deferred build that never ran.
         reasons = sorted({SKIP_REASON_MESSAGES[d.skip_reason] for d in unchecked})
         count = len(deltas)
+        # "could be gated" rather than "produced an estimate": a basis mismatch
+        # produces two perfectly good estimates and fails on the comparison
+        # between them, so the narrower wording would be untrue of it.
         breaches.append(
             f"nothing was checked: none of the {count} selected model"
-            f"{'' if count == 1 else 's'} produced an estimate — {'; '.join(reasons)}"
+            f"{'' if count == 1 else 's'} could be gated — {'; '.join(reasons)}"
         )
     elif thr.any_set:
         # A model the gate could not check, on a run that asked for enforcement.

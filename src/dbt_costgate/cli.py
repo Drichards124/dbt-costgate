@@ -470,15 +470,17 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             )
 
     # "Nothing to estimate" and "what you changed is not something I price" are
-    # different answers and used to read identically.
-    if not selected:
-        touched = artifacts.changed_out_of_scope(
-            current_manifest,
-            baseline_manifest if baseline_nodes is not None and eff_baseline else None,
-            selection.paths,
-        )
-        for name, reason in sorted(touched.items()):
-            print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
+    # different answers and used to read identically. Said on every run rather
+    # than only an empty one: a change that touches three models and a snapshot
+    # has an unpriced snapshot in it either way, and a snapshot runs a MERGE.
+    # stderr, so it never reaches a pull-request comment as if it were a figure.
+    touched = artifacts.changed_out_of_scope(
+        current_manifest,
+        baseline_manifest if baseline_nodes is not None and eff_baseline else None,
+        selection.paths,
+    )
+    for name, reason in sorted(touched.items()):
+        print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
 
     diff_mode = baseline_nodes is not None
     if runner is None:

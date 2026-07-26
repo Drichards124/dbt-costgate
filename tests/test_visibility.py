@@ -215,6 +215,30 @@ def test_a_change_to_an_unpriced_node_says_so_rather_than_nothing(
     assert expected in err
 
 
+def test_an_unpriced_node_is_named_even_when_models_were_estimated_too(tmp_path: Path, capsys):
+    """A change that touches three models and a snapshot still has an unpriced
+    snapshot in it. Said on stderr, so it never reaches a pull-request comment
+    looking like a figure."""
+    current = make_manifest(
+        make_node("kept", compiled_code="KEPT", checksum="new"),
+        make_node("orders_snapshot", resource_type="snapshot", checksum="new"),
+    )
+    baseline = _baseline(
+        tmp_path,
+        make_node("kept", compiled_code="KEPT", checksum="old"),
+        make_node("orders_snapshot", resource_type="snapshot", checksum="old"),
+    )
+    target = write_target(tmp_path, current)
+    code = main(
+        ["check", "--current", str(target), "--baseline", str(baseline), "--format", "json"],
+        runner=FakeDryRunner({"KEPT": TIB}),
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert [m["name"] for m in json.loads(captured.out)["models"]] == ["kept"]
+    assert "orders_snapshot changed but is not priced" in captured.err
+
+
 def test_a_run_with_nothing_at_all_changed_stays_quiet(tmp_path: Path, capsys):
     manifest = make_manifest(make_node("kept", compiled_code="KEPT", checksum="same"))
     target = write_target(tmp_path, manifest)

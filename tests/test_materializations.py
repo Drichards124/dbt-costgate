@@ -6,9 +6,9 @@
 new materialization is handled by falling through rather than by decision, and
 nothing failed when that was wrong. These tests pin what each type does today.
 
-Where the current behaviour is a confirmed defect the test asserts the *correct*
-behaviour and carries a strict xfail: CI stays green now, and the day someone
-fixes it the test XPASSes and fails, which is the signal to drop the marker.
+The tests below the divider were written against defects the QA pass found, so
+each asserts the behaviour we wanted rather than the behaviour we had. They
+carried `xfail(strict=True)` until the fixes landed and turned them red.
 """
 
 import json
