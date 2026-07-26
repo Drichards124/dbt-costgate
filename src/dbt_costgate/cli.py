@@ -12,7 +12,7 @@ from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, not
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
-from dbt_costgate.config import CONFIG_REFERENCE, Config
+from dbt_costgate.config import CONFIG_REFERENCE, Config, render_config_template
 from dbt_costgate.gitdiff import GitDiffError
 from dbt_costgate.models import PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
@@ -118,6 +118,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     cfg.add_argument("--format", choices=["terminal", "json"], default="terminal")
+
+    init = sub.add_parser(
+        "init",
+        help="Write a starter .dbt-costgate.yml, with every setting commented out.",
+        description=(
+            "Create a .dbt-costgate.yml in the project directory, documenting every "
+            "setting with an example value and leaving all of them commented out, so "
+            "the file changes nothing until you uncomment something. Refuses to "
+            "overwrite an existing config."
+        ),
+    )
+    init.add_argument(
+        "--project-dir",
+        help="Directory to write the config into (default: the current directory).",
+    )
 
     return parser
 
@@ -420,6 +435,34 @@ def run_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_init(args: argparse.Namespace) -> int:
+    project_dir = Path(args.project_dir).resolve() if args.project_dir else Path.cwd()
+    if not project_dir.is_dir():
+        print(
+            f"dbt-costgate: --project-dir does not exist: {args.project_dir}",
+            file=sys.stderr,
+        )
+        return policy.EXIT_OPERATIONAL
+
+    # Refuse on any discoverable name, not just the one about to be written.
+    # Leaving two config files behind, with load order quietly picking one, is a
+    # worse outcome than not writing anything.
+    for name in Config.DEFAULT_FILENAMES:
+        existing = project_dir / name
+        if existing.is_file():
+            print(
+                f"dbt-costgate: {existing} already exists — not overwriting it.",
+                file=sys.stderr,
+            )
+            return policy.EXIT_OPERATIONAL
+
+    target = project_dir / Config.DEFAULT_FILENAMES[0]
+    target.write_text(render_config_template(), "utf-8")
+    print(f"Wrote {target}")
+    print("Every setting is commented out; uncomment what you need. Nothing changes yet.")
+    return 0
+
+
 def main(argv: list[str] | None = None, runner: DryRunner | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -427,6 +470,8 @@ def main(argv: list[str] | None = None, runner: DryRunner | None = None) -> int:
         return run_check(args, runner=runner)
     if args.command == "config":
         return run_config(args)
+    if args.command == "init":
+        return run_init(args)
     parser.print_help()
     return 0
 
