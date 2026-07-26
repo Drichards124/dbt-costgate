@@ -329,7 +329,7 @@ you uncomment something.
 | `baselines` | `map[str->{manifest|against}]` | _empty_ | Named baseline sources (dbt --target analogy). Each name maps to either a `manifest:` path or an `against:` git ref. Select one with --baseline-target <name>; a `manifest` target travels to CI, an `against` target needs git+dbt. |
 | `default_baseline` | `str` | _none_ | Name of the `baselines:` entry to use when no --baseline/--against/--baseline-target is given, so `dbt-costgate check` diffs without a flag. |
 | `report.format` | `terminal|markdown|json` | `terminal` | Output format when not overridden by --format. |
-| `fail_on` | `never|warn|fail` | `fail` | Gate strictness: 'never' never fails the build, 'warn' fails on warnings, 'fail' fails only on threshold breaches. |
+| `fail_on` | `never|warn|fail` | `fail` | Gate strictness. 'never' reports breaches but always exits 0. 'fail' (the default) and 'warn' both exit 1 on a breach; they differ only in the label the report prints, FAIL or WARN. Warnings themselves are never an input to the gate. |
 | `notices.silence` | `list[str]` | _empty_ | Ids of advisory notices to stop reporting, e.g. dead-money-thresholds on a team that has deliberately priced at 0. Each report prints a notice's id beside it, and `dbt-costgate config` lists them. Silencing is per-notice on purpose: there is no blanket off-switch, so turning one off can never hide a different one you have not seen. An unknown id is an error, not a no-op. |
 <!-- END GENERATED: config-reference -->
 

@@ -34,12 +34,15 @@ def manifest_path(path: Path) -> Path:
     return path
 
 
-def load_manifest(path: Path) -> dict:
+def load_manifest(path: Path, flag: str = "--current") -> dict:
+    """`flag` names the option this path came from, so a missing baseline is not
+    explained in terms of `--current` — telling the user to fix a flag they got
+    right."""
     mpath = manifest_path(path)
     if not mpath.is_file():
         raise ArtifactError(
             f"No manifest.json at {mpath}. Run `dbt compile` first, then point "
-            f"--current at the target/ directory (or pass the manifest path)."
+            f"{flag} at the target/ directory (or pass the manifest path)."
         )
     try:
         return json.loads(mpath.read_text("utf-8"))

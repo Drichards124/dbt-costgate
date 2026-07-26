@@ -496,8 +496,10 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "fail_on",
         "never|warn|fail",
         "fail",
-        "Gate strictness: 'never' never fails the build, 'warn' fails on "
-        "warnings, 'fail' fails only on threshold breaches.",
+        "Gate strictness. 'never' reports breaches but always exits 0. 'fail' "
+        "(the default) and 'warn' both exit 1 on a breach; they differ only in "
+        "the label the report prints, FAIL or WARN. Warnings themselves are "
+        "never an input to the gate.",
         example="warn",
     ),
     ConfigField(

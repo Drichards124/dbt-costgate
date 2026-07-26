@@ -405,7 +405,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     baseline_nodes = None
     if eff_baseline:
         try:
-            baseline_manifest = artifacts.load_manifest(Path(eff_baseline))
+            baseline_manifest = artifacts.load_manifest(Path(eff_baseline), "--baseline")
         except ArtifactError as exc:
             print(f"dbt-costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL

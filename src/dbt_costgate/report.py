@@ -605,6 +605,14 @@ def _md_name(d: CostDelta) -> str:
 
 def render_json(report: Report) -> str:
     d0 = report.disclosure
+    diff = report.mode == "diff"
+
+    def delta(value):
+        """Absolute mode has no baseline, so it has no delta from one. The
+        run-level `net` block already nulls these; the per-model fields were
+        populated anyway, which is a number with no question behind it."""
+        return value if diff else None
+
     payload = {
         "mode": report.mode,
         "verdict": {
@@ -631,9 +639,9 @@ def render_json(report: Report) -> str:
         # Signed: negative is a saving. Only meaningful in diff mode, which is why
         # every field is null in absolute mode — there is no baseline to net against.
         "net": {
-            "bytes": report.net_bytes if report.mode == "diff" else None,
-            "usd_per_run": report.net_usd_per_run if report.mode == "diff" else None,
-            "usd_per_month": report.net_usd_per_month if report.mode == "diff" else None,
+            "bytes": delta(report.net_bytes),
+            "usd_per_run": delta(report.net_usd_per_run),
+            "usd_per_month": delta(report.net_usd_per_month),
             "models_estimated": len(report.estimated),
             "models_total": len(report.deltas),
         },
@@ -658,9 +666,9 @@ def render_json(report: Report) -> str:
                 "bytes_current": d.bytes_current,
                 "usd_baseline": d.usd_baseline,
                 "usd_current": d.usd_current,
-                "usd_per_run_delta": d.usd_per_run_delta,
-                "usd_per_month_delta": d.usd_per_month_delta,
-                "pct_delta": d.pct_delta,
+                "usd_per_run_delta": delta(d.usd_per_run_delta),
+                "usd_per_month_delta": delta(d.usd_per_month_delta),
+                "pct_delta": delta(d.pct_delta),
                 "runs_per_month": d.runs_per_month,
                 "warnings": d.warnings,
                 "error": d.error,

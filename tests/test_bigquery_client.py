@@ -147,32 +147,44 @@ def test_a_failed_dry_run_reports_no_bytes_and_no_location():
         "400 Column ssn_503 not found in table",
     ],
 )
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F16: bigquery.py:52 matches '429'/'500'/'503' anywhere in the message, "
-    "so a permanent SQL error is reported as 'BigQuery was unavailable and the "
-    "retries ran out' — and in production the retry loop would keep retrying it",
-)
 def test_a_status_code_inside_the_message_is_not_a_transient_failure(message):
     assert categorize(BadRequest(message), SELF_RELATION)[0] is ErrorKind.INVALID_SQL
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F15: _relation_in_message compares only the bare table token, so a 404 "
-    "on a different dataset's same-named table reads as the model's own destination "
-    "— which is non-operational, so the run can still exit 0",
-)
 def test_a_404_on_a_same_named_upstream_is_not_the_models_own_destination():
     exc = NotFound("404 Not found: Table proj:raw_landing.orders was not found in location US")
     assert categorize(exc, SELF_RELATION)[0] is ErrorKind.UPSTREAM_MISSING
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-F23: use_legacy_sql is never set; standard SQL holds only because the "
-    "client library defaults it, while the REST API's own default is legacy",
+def test_a_404_on_the_models_own_table_still_reads_as_its_destination():
+    exc = NotFound("404 Not found: Table proj:marts.orders was not found in location US")
+    assert categorize(exc, SELF_RELATION)[0] is ErrorKind.DESTINATION_MISSING
+
+
+def test_the_exception_class_outranks_words_in_its_message():
+    """`400 Column ssn_503 not found in table` is an ordinary column error that
+    reads as a missing table *and* a transient failure if you go looking for
+    words. The class the client library chose is the thing to trust."""
+    assert (
+        categorize(BadRequest("400 Column ssn_503 not found in table"), SELF_RELATION)[0]
+        is ErrorKind.INVALID_SQL
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("503 Backend Error", ErrorKind.TRANSIENT),
+        ("404 Not found: Table proj:raw.upstream", ErrorKind.UPSTREAM_MISSING),
+        ("403 Access Denied: no permission", ErrorKind.PERMISSION),
+        ("Syntax error near WHERE", ErrorKind.INVALID_SQL),
+        ("something else entirely", ErrorKind.OTHER),
+    ],
 )
+def test_an_exception_with_no_useful_class_falls_back_to_its_message(message, expected):
+    assert categorize(RuntimeError(message), SELF_RELATION)[0] is expected
+
+
 def test_standard_sql_is_requested_explicitly():
     client = _Client(job=_Job(1, "US"))
     _runner(client).dry_run("select 1")
