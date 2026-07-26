@@ -49,6 +49,38 @@ def test_the_image_runs_a_python_the_matrix_tests():
     )
 
 
+def _dependabot_python_floor() -> str:
+    """The version at which Dependabot stops proposing base-image bumps."""
+    cfg = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text("utf-8"))
+    for update in cfg["updates"]:
+        if update.get("package-ecosystem") != "docker":
+            continue
+        for rule in update.get("ignore", []):
+            if rule.get("dependency-name") == "python":
+                floors = [v for v in rule.get("versions", []) if v.startswith(">=")]
+                assert len(floors) == 1, f"expected one `>=` floor, got {floors}"
+                return floors[0][2:]
+    raise AssertionError("no python ignore rule in the docker ecosystem block")
+
+
+def test_the_dependabot_floor_is_exactly_where_the_matrix_ends():
+    """The ignore rule and the CI matrix encode the same fact — which Python
+    versions this project is willing to ship an image on — in two files. Left
+    unchecked, the rule silently outlives its reason: the matrix grows, and
+    Dependabot goes on suppressing a bump that would now be fine.
+
+    Stated as an equality rather than a bound, so widening the matrix fails here
+    and names the line to change.
+    """
+    newest = max(tuple(int(p) for p in v.split(".")) for v in _ci_matrix_pythons())
+    expected = f"{newest[0]}.{newest[1] + 1}"
+    assert _dependabot_python_floor() == expected, (
+        f"dependabot.yml suppresses python >={_dependabot_python_floor()}, but the CI "
+        f"matrix now ends at {newest[0]}.{newest[1]} — the floor should be {expected}. "
+        f"Raise it, or drop the ignore rule if the matrix has caught up with upstream."
+    )
+
+
 def test_every_stage_of_the_dockerfile_uses_the_same_python():
     """The wheel is built in one stage and installed in another. Building on one
     version and running on another is how a wheel that cannot be imported gets
