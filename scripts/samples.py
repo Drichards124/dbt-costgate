@@ -227,6 +227,19 @@ def config_reference() -> str:
     return "\n".join(rows)
 
 
+def config_template() -> str:
+    """The starter config `dbt-costgate init` writes, from the same registry.
+
+    The docs used to carry a hand-written version of this with every key filled
+    in — which taught the keys but handed a reader a fully configured file, and
+    had to be remembered into whenever a key was added. Showing what the command
+    actually produces removes both problems at once.
+    """
+    from dbt_costgate.config import render_config_template
+
+    return render_config_template()
+
+
 def _slot_deltas():
     return [
         _delta("fct_orders_daily", int(2.91 * TIB), int(0.80 * TIB), rate=0.0, incremental=True)
@@ -308,6 +321,7 @@ SAMPLES = {
     "unknown-region-terminal": (unknown_region_terminal, "text"),
     "mixed-frequency-terminal": (mixed_frequency_terminal, "text"),
     "config-reference": (config_reference, None),
+    "config-template": (config_template, "yaml"),
 }
 
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -174,6 +175,13 @@ class ConfigField:
     type_label: str  # human type hint, e.g. "map[str->float]"
     default: Any  # the literal parser default (native value, for a clean JSON contract)
     help: str  # plain-English explanation; notes the *effective* default when it differs
+    # An illustrative value, as YAML. Scalars are written inline after the key;
+    # `map[...]`/`list[...]` entries are written as an indented block under it,
+    # decided from type_label rather than by inspecting the string. This is what
+    # `dbt-costgate init` puts in the starter file — deliberately an example, never
+    # the default, so a key whose default is also a valid setting (report.format,
+    # fail_on) shows something that visibly differs from doing nothing.
+    example: str = ""
 
 
 # Every key `Config._from_dict` understands, described once. Keep this in lockstep
@@ -186,6 +194,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Force the pricing region. Default: auto-detected from the dry-run job "
         "location, falling back to US.",
+        example="europe-west3",
     ),
     ConfigField(
         "pricing.usd_per_tib",
@@ -194,6 +203,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Flat on-demand rate override (USD/TiB) for every region. Default: the "
         "built-in per-region rate table.",
+        example="5.00",
     ),
     ConfigField(
         "pricing.currency",
@@ -205,6 +215,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "yourself — dbt-costgate never converts between currencies — so any "
         "region still priced from the built-in table is an error, not a "
         "conversion.",
+        example="EUR",
     ),
     ConfigField(
         "pricing.regions",
@@ -214,6 +225,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Per-region rate overrides (region -> USD/TiB) that patch the built-in "
         "table. Keys match case-insensitively; 0 is allowed. Unlisted regions "
         "use the table.",
+        example="europe-west3: 4.80\nUS: 6.00",
     ),
     ConfigField(
         "thresholds.max_usd_increase_per_run",
@@ -221,6 +233,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's per-run cost increase exceeds this many USD.",
+        example="5.00",
     ),
     ConfigField(
         "thresholds.max_pct_increase",
@@ -228,6 +241,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's cost increases by more than this percent.",
+        example="25",
     ),
     ConfigField(
         "thresholds.max_usd_increase_per_month",
@@ -235,6 +249,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's projected monthly cost increase exceeds this many USD.",
+        example="100.00",
     ),
     ConfigField(
         "thresholds.max_usd_total",
@@ -243,6 +258,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Absolute ceiling: gate fails if a model's total per-run cost exceeds this "
         "many USD, regardless of its increase. Needs no baseline (works in local mode).",
+        example="20.00",
     ),
     ConfigField(
         "thresholds.max_tib_total",
@@ -251,6 +267,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Absolute ceiling: gate fails if a model's total per-run scan exceeds this "
         "many TiB, regardless of its increase. Needs no baseline (works in local mode).",
+        example="3.00",
     ),
     ConfigField(
         "run_frequency.default",
@@ -259,6 +276,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Assumed runs per month for the monthly-cost estimate, for models "
         "without an explicit entry.",
+        example="30",
     ),
     ConfigField(
         "run_frequency.models",
@@ -266,6 +284,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "map[str->int]",
         {},
         "Per-model runs-per-month overrides (model name -> runs) for the monthly estimate.",
+        example="fct_orders_daily: 24",
     ),
     ConfigField(
         "exclude",
@@ -273,6 +292,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "list[str]",
         [],
         "Model names reported but never gated.",
+        example="- events_partitioned",
     ),
     ConfigField(
         "warn_only",
@@ -280,6 +300,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "list[str]",
         [],
         "Model names shown as a warning instead of gated.",
+        example="- sessions_rolling",
     ),
     ConfigField(
         "renames",
@@ -289,6 +310,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Pair a renamed model to its baseline for a diff (current -> baseline), for "
         "when a model rename changes its unique_id and auto-matching can't. Each side "
         "is a model name or a full unique_id. Requires a baseline (diff mode).",
+        example="fct_orders_daily: fct_orders_monthly",
     ),
     ConfigField(
         "baselines",
@@ -298,6 +320,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Named baseline sources (dbt --target analogy). Each name maps to either a "
         "`manifest:` path or an `against:` git ref. Select one with --baseline-target "
         "<name>; a `manifest` target travels to CI, an `against` target needs git+dbt.",
+        example="main:\n  against: main\nple:\n  manifest: artifacts/ple/manifest.json",
     ),
     ConfigField(
         "default_baseline",
@@ -306,6 +329,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Name of the `baselines:` entry to use when no --baseline/--against/"
         "--baseline-target is given, so `dbt-costgate check` diffs without a flag.",
+        example="main",
     ),
     ConfigField(
         "report.format",
@@ -313,6 +337,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "terminal|markdown|json",
         "terminal",
         "Output format when not overridden by --format.",
+        example="markdown",
     ),
     ConfigField(
         "fail_on",
@@ -321,6 +346,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "fail",
         "Gate strictness: 'never' never fails the build, 'warn' fails on "
         "warnings, 'fail' fails only on threshold breaches.",
+        example="warn",
     ),
     ConfigField(
         "notices.silence",
@@ -333,5 +359,78 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "is per-notice on purpose: there is no blanket off-switch, so turning "
         "one off can never hide a different one you have not seen. An unknown "
         "id is an error, not a no-op.",
+        example="- dead-money-thresholds",
     ),
 ]
+
+
+_TEMPLATE_PREAMBLE = """\
+# .dbt-costgate.yml — written by `dbt-costgate init`.
+#
+# Every setting below is commented out, so this file changes nothing until you
+# uncomment one. Section headers are left live, so switching a setting on is a
+# one-line edit.
+#
+# The values shown are illustrations, not defaults. Each key's real default is
+# in the note above it, and `dbt-costgate config` prints the same reference
+# at any time.
+#
+# Commit this file. `dbt-costgate check` reads it identically on your machine
+# and in CI, so there is nothing separate to configure for a PR run.
+---
+"""
+
+# yamllint's default profile caps lines at 80, and this file is handed to people
+# who may well lint it. The budget is the whole rendered line: the indent, the
+# "# " that comments it out, and the text.
+_WIDTH = 80
+
+
+def render_config_template(*, commented: bool = True) -> str:
+    """The starter `.dbt-costgate.yml`, generated from `CONFIG_REFERENCE`.
+
+    Generated rather than written, for the reason the config table in the docs is:
+    a hand-maintained template has to be edited every time a key is added, by
+    someone who has just finished adding the key. Here that failure is quiet —
+    the file simply never mentions the setting.
+
+    `commented=False` renders the same content live. Nothing ships that form; it
+    exists so a test can prove every `example` is YAML the parser actually
+    accepts, which reading the commented file cannot establish.
+    """
+    lines = [_TEMPLATE_PREAMBLE.rstrip("\n")] if commented else []
+    section: str | None = None
+    prefix = "# " if commented else ""
+
+    first_in_section = True
+    for f in CONFIG_REFERENCE:
+        head, _, leaf = f.key.rpartition(".")
+        if head != section:
+            section = head
+            first_in_section = True
+            if head:
+                lines += ["", f"{head}:"]
+        indent = "  " if head else ""
+        if not first_in_section or not head:
+            lines.append("")
+        first_in_section = False
+
+        if commented:
+            # break_on_hyphens: otherwise "dbt-costgate" wraps as "dbt-" / "costgate".
+            for note in textwrap.wrap(
+                " ".join(f.help.split()),
+                width=_WIDTH - len(indent) - len(prefix),
+                break_on_hyphens=False,
+            ):
+                lines.append(f"{indent}{prefix}{note}")
+
+        # A map or a list has to sit in a block under its key; writing
+        # `exclude: - events_partitioned` inline would not be YAML at all.
+        if f.type_label.startswith(("map[", "list[")):
+            lines.append(f"{indent}{prefix}{leaf}:")
+            for value_line in f.example.splitlines():
+                lines.append(f"{indent}{prefix}  {value_line}")
+        else:
+            lines.append(f"{indent}{prefix}{leaf}: {f.example}")
+
+    return "\n".join(lines).lstrip("\n") + "\n"

@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`dbt-costgate init`** — writes a starter `.dbt-costgate.yml`:
+
+  ```bash
+  dbt-costgate init
+  ```
+
+  Config discovery has always worked, but nothing told you to create the file,
+  and the documented example had every setting filled in — copy it and you had a
+  configured project rather than a starting point. The written file documents
+  every setting with its default, its type and an example value, and leaves all
+  of them **commented out**, so it changes nothing until you uncomment one. It
+  refuses to overwrite an existing config, including one under either of the
+  other discovered names, and takes `--project-dir` when your dbt project is not
+  the directory you are standing in.
+
 - **A `Dockerfile`**, so CI that isn't GitHub Actions can run the same check
   without a Python environment of its own:
 
