@@ -101,6 +101,16 @@ def _estimate_one(
                 est.warnings.append("baseline unavailable — could not dry-run the main version")
         else:
             est.warnings.append("baseline has no compiled SQL (compile main the same way)")
+            # Decided here, where the condition is actually known. This used to
+            # fall out of the basis-mismatch branch below: an absent baseline was
+            # given a basis anyway, which collided with the current one often
+            # enough to clear `gateable` — but only when the current side came out
+            # incremental-form, so the same missing baseline gated or did not gate
+            # depending on how the *branch* happened to compile. Ungateable is the
+            # right answer either way: with no baseline bytes the delta maths read
+            # the model as new, so the whole current scan looks like an increase,
+            # and a threshold firing on that is firing on a missing measurement.
+            est.gateable = False
 
     if est.basis_mismatch:
         est.warnings.append(

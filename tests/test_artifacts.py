@@ -295,3 +295,16 @@ def test_every_basis_that_needs_a_label_has_a_complete_one():
     assert labelled == set(EstimateBasis) - {EstimateBasis.DIRECT}
     for basis, label in BASIS_LABELS.items():
         assert label.tag and label.warning and label.footnote, basis
+
+
+@pytest.mark.parametrize("materialized", ["incremental", "view"])
+def test_no_sql_yields_no_basis_whatever_the_materialization(materialized):
+    """A basis describes a measurement. With nothing compiled there is nothing to
+    describe, and the answer is absence rather than a default — including for a
+    view, where `direct` would be a true statement about the model and still a
+    claim about SQL that was never read."""
+    uid, node_dict = make_node("m", materialized=materialized)
+    node = artifacts.model_nodes(make_manifest((uid, node_dict)))[uid]
+    assert artifacts.detect_basis(node, None) is None
+    assert artifacts.detect_basis(node, "") is None
+    assert artifacts.detect_basis(node, "select 1") is not None
