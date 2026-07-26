@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dbt_costgate import notices, policy, report
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import TIB, CostDelta, PricingDisclosure, Report
+from dbt_costgate.models import INCREMENTAL_BASIS_WARNING, TIB, CostDelta, PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
 
 MIB = 1024**2
@@ -111,7 +111,7 @@ def _pr_deltas(rate: float = US_RATE):
             int(0.80 * TIB),
             rate=rate,
             incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            warning=INCREMENTAL_BASIS_WARNING,
         ),
         _delta("dim_customers", int(412.5 * MIB), rate=rate, new=True),
     ]
@@ -142,7 +142,7 @@ def local_terminal() -> str:
             "fct_orders_daily",
             int(2.91 * TIB),
             incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            warning=INCREMENTAL_BASIS_WARNING,
         ),
         _delta("dim_customers", int(0.4016 * TIB)),
     ]
@@ -186,7 +186,7 @@ def mixed_frequency_terminal() -> str:
             int(2.91 * TIB),
             int(0.80 * TIB),
             incremental=True,
-            warning="incremental — figure is the full-refresh scan",
+            warning=INCREMENTAL_BASIS_WARNING,
             runs=4,
         ),
         _delta("dim_customers", int(412.5 * MIB), new=True, runs=30),

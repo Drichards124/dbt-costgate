@@ -61,6 +61,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The incremental caveat is now one footnote instead of one line per model.**
+  A change touching five incrementals printed the same sentence five times,
+  which pushed the caveats that are about a *specific* model — a dynamic filter,
+  a missing baseline — under a wall of repeats. Reports now tag the rows and
+  explain the tag once:
+
+  ```text
+    fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%
+    fct_events_hourly (full-refresh): 40.10 GiB → 44.02 GiB   +10%
+
+    ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh
+      scan, not an incremental run.
+  ```
+
+  The per-row `full-refresh` tag is unchanged, so you can still see exactly
+  which models it covers, and no other warning is collapsed. If you parse the
+  terminal or markdown output, note the string `incremental — figure is the
+  full-refresh scan` no longer appears in either. **The JSON payload is
+  unchanged** — `models[].warnings` still carries that warning per model, since
+  a machine reader has no repetition problem to solve.
+
 - **Priced reports now disclose the free tier they do not deduct**, in the footer
   beside the rate they used:
 

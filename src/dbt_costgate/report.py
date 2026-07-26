@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import json
 
-from dbt_costgate.models import CostDelta, PricingDisclosure, Report, Status, format_money
+from dbt_costgate.models import (
+    INCREMENTAL_BASIS_WARNING,
+    CostDelta,
+    PricingDisclosure,
+    Report,
+    Status,
+    format_money,
+)
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
 
@@ -105,6 +112,37 @@ def _footer_notes(d: PricingDisclosure) -> list[str]:
         notes.append(_FREE_TIER_NOTE)
     notes.append(_DRYRUN_NOTE)
     return notes
+
+
+_INCREMENTAL_FOOTNOTE = (
+    "full-refresh — for the rows tagged above, the figure is the full-refresh "
+    "scan, not an incremental run."
+)
+
+
+def _row_warnings(d: CostDelta) -> list[str]:
+    """A model's own caveats, minus the one that is really about the tag.
+
+    The incremental warning explains what `full-refresh` on a row means, which is
+    identical for every row carrying it. Printed per model it scaled with the
+    number of incrementals in the change and pushed the warnings that *are* about
+    one model — a dynamic filter, a missing baseline — down a list of repeats.
+    """
+    return [w for w in d.warnings if w != INCREMENTAL_BASIS_WARNING]
+
+
+def _incremental_footnote(report: Report) -> str | None:
+    """The collapsed warning, or None when no row carried it.
+
+    Keyed on the warning itself rather than on `is_incremental`, so the footnote
+    speaks for exactly the rows the per-row lines used to. The two conditions look
+    interchangeable and are not: `sql_warnings` returns nothing at all for a model
+    with no compiled SQL, so a footnote driven off the tag would start covering
+    rows that never carried the warning.
+    """
+    if any(INCREMENTAL_BASIS_WARNING in d.warnings for d in report.deltas):
+        return _INCREMENTAL_FOOTNOTE
+    return None
 
 
 def _delta_cell(d: CostDelta, currency: str) -> str:
@@ -218,10 +256,15 @@ def render_terminal(report: Report) -> str:
             lines.append(
                 f"  {d.name}{flag_str}: {humanize_bytes(d.bytes_current)} scanned   {cost}{monthly}"
             )
-        for w in d.warnings:
+        for w in _row_warnings(d):
             lines.append(f"      ⚠ {w}")
         if d.error:
             lines.append(f"      • {d.error}")
+
+    footnote = _incremental_footnote(report)
+    if footnote:
+        lines.append("")
+        lines.append(f"  ⚠ {footnote}")
 
     net = _net_line(report)
     if net:
@@ -307,14 +350,19 @@ def render_markdown(report: Report) -> str:
             )
             out.append(f"| {_md_name(d)} | {humanize_bytes(d.bytes_current)} | {cost} | {month} |")
 
-    caveats = [(d.name, w) for d in report.deltas for w in d.warnings]
+    caveats = [(d.name, w) for d in report.deltas for w in _row_warnings(d)]
     errors = [(d.name, d.error) for d in report.deltas if d.error]
-    if caveats or errors:
+    footnote = _incremental_footnote(report)
+    if caveats or errors or footnote:
         out.append("")
         for name, w in caveats:
             out.append(f"> ⚠ **{name}** — {w}")
         for name, e in errors:
             out.append(f"> • **{name}** — {e}")
+        # Last: it annotates the table's tags rather than any one model, so it
+        # reads as the footnote it is instead of another per-model caveat.
+        if footnote:
+            out.append(f"> ⚠ {footnote}")
 
     net = _net_line(report)
     if net:

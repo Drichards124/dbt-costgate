@@ -69,7 +69,7 @@ comment itself — GitHub renders it from the same markdown dbt-costgate produce
 | `fct_orders_daily` _full-refresh_ | 819.20 GiB | 2.91 TiB | +264% | USD +13.19 | USD +395.63 |
 | `dim_customers` _new_ | — | 412.50 MiB | — | USD +0.00 | USD +0.07 |
 
-> ⚠ **fct_orders_daily** — incremental — figure is the full-refresh scan
+> ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
 **Net increase:** USD 13.19/run · USD 395.70/month
 
@@ -94,8 +94,9 @@ dbt-costgate check --baseline path/to/main/manifest.json
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
   fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +395.63/month (30 runs)
-      ⚠ incremental — figure is the full-refresh scan
   dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the full-refresh scan, not an incremental run.
 
   Net increase: USD 13.19/run · USD 395.70/month
 

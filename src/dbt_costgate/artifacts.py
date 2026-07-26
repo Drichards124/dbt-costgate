@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from dbt_costgate.models import EstimateBasis, ModelNode
+from dbt_costgate.models import INCREMENTAL_BASIS_WARNING, EstimateBasis, ModelNode
 
 # Statically-unknowable filters make a BigQuery dry-run fall back to a full-table
 # scan (see docs/architecture.md). We can't correct the number, only flag it.
@@ -275,5 +275,5 @@ def sql_warnings(node: ModelNode, sql: str | None) -> list[str]:
     if _MULTI_STATEMENT.search(sql):
         warnings.append("multi-statement — dry-run bytes may be partial")
     if node.is_incremental:
-        warnings.append("incremental — figure is the full-refresh scan")
+        warnings.append(INCREMENTAL_BASIS_WARNING)
     return warnings
