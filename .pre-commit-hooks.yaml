@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hook definition for consumers. Adding dbt-costgate to a project's
+# .pre-commit-config.yaml is enough to run it — pre-commit builds an isolated
+# environment from this repository and installs the published console script, so
+# nothing here is dbt-costgate runtime code.
+#
+#   repos:
+#     - repo: https://github.com/Drichards124/dbt-costgate
+#       rev: v0.8.0
+#       hooks:
+#         - id: dbt-costgate
+
+- id: dbt-costgate
+  name: dbt-costgate (BigQuery cost gate)
+  description: >-
+    Dry-run the dbt models this change touches and report what they scan and
+    cost. Nothing is executed and no bytes are billed.
+  entry: dbt-costgate check
+  language: python
+
+  # Pre-push, deliberately not pre-commit. The check needs a compiled dbt target
+  # and a BigQuery round-trip per changed model, which is seconds of waiting —
+  # on every commit that is the kind of hook people turn off. Pushing is the
+  # last moment before the cost reaches anyone else, which is the moment worth
+  # spending it at.
+  stages: [pre-push]
+
+  # dbt-costgate does its own selection (git diff, or the baseline manifest) and
+  # takes no file arguments, so the filename list is only used to decide whether
+  # this hook has anything to do at all.
+  pass_filenames: false
+  files: \.(sql|ya?ml)$
+
+  # `pre-push` as a stage name — rather than the old `push` — requires 3.2.0.
+  minimum_pre_commit_version: "3.2.0"
