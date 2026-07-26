@@ -426,6 +426,12 @@ Diffing those two would produce a confident, meaningless number. dbt-costgate
 detects the mismatch and flags the model instead — `mixed basis — baseline is
 incremental_form, current is full_refresh; recompile the baseline the same way`.
 
+A baseline that has **no compiled SQL at all** is a different condition and says
+so separately (`baseline has no compiled SQL`). It is not a mismatch: there is no
+second shape to be mismatched with, so nothing is claimed about one. That model
+is reported but not gated, since without baseline bytes its entire current scan
+would read as an increase.
+
 > **What to do:** compile the baseline the way CI compiles the branch —
 > `dbt compile --defer --state path/to/prod/artifacts --favor-state` — then stop
 > relying on anyone remembering that. Point a
