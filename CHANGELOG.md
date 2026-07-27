@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
+## [Unreleased]
+
+### Fixed
+
+- **A mistyped dataset name no longer tells you to log in again.** BigQuery
+  answers `403` — not `404` — for a dataset or project that does not exist, so a
+  typo used to end the run with `could not estimate any model (check
+  credentials/permissions). Try gcloud auth application-default login` and exit
+  2. The exit code is unchanged, but both messages now name the other cause:
+
+  ```
+  not estimated — BigQuery refused the dry-run — either it is not allowed, or
+  the dataset or project does not exist
+  ```
+
+  Check the names in your `--select` and your model SQL before reaching for IAM.
+
 ## [0.11.0] - 2026-07-26
 
 ### Added

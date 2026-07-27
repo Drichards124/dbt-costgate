@@ -166,7 +166,16 @@ ERROR_KIND_REASONS: dict[ErrorKind, str] = {
         "target for the full-refresh estimate"
     ),
     ErrorKind.UPSTREAM_MISSING: "an upstream table it reads has not been materialized",
-    ErrorKind.PERMISSION: "BigQuery denied permission for the dry-run",
+    # BigQuery answers 403 both for a table it will not let you read and for a
+    # dataset or project that does not exist — deliberately, so a stranger cannot
+    # map an account by watching 404s turn into 403s. Its own message hedges
+    # ("or perhaps it does not exist"); this one used to drop the hedge and say
+    # only "denied permission", which sends someone to IAM when the real fix is a
+    # typo in a dataset name. Verified against real BigQuery, 2026-07-27.
+    ErrorKind.PERMISSION: (
+        "BigQuery refused the dry-run — either it is not allowed, or the dataset "
+        "or project does not exist"
+    ),
     ErrorKind.INVALID_SQL: "BigQuery rejected the compiled SQL",
     ErrorKind.TRANSIENT: "BigQuery was unavailable and the retries ran out",
     ErrorKind.OTHER: "the dry-run failed",

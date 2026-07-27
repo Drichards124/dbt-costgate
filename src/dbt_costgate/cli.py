@@ -503,8 +503,10 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
 
     if selected and estimate.has_only_operational_failures(estimates):
         print(
-            "dbt-costgate: could not estimate any model (check credentials/permissions). "
-            "Try `gcloud auth application-default login`.",
+            "dbt-costgate: could not estimate any model — each reason is above. "
+            "BigQuery returns the same 403 whether the dry-run is not allowed or "
+            "the dataset or project does not exist, so check those names too. "
+            "If it is credentials: `gcloud auth application-default login`.",
             file=sys.stderr,
         )
         return policy.EXIT_OPERATIONAL

@@ -43,7 +43,10 @@ def test_the_rules_that_matter_are_not_ignored_in_config():
 
 def test_the_rules_that_matter_are_not_suppressed_at_a_call_site():
     offenders = []
-    for path in list((ROOT / "src").rglob("*.py")) + list((ROOT / "tests").rglob("*.py")):
+    # scripts/ is in scope because that is where the shelling-out lives: the
+    # sample generator and the live-BigQuery harness both spawn subprocesses.
+    searched = [(ROOT / d).rglob("*.py") for d in ("src", "tests", "scripts")]
+    for path in [p for group in searched for p in group]:
         if path.name == Path(__file__).name:
             continue
         for n, line in enumerate(path.read_text("utf-8").splitlines(), 1):
