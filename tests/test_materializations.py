@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeDryRunner, make_manifest, make_node, write_target
-from dbt_costgate.artifacts import detect_basis, model_nodes
+from dbt_costgate.artifacts import detect_basis, model_nodes, out_of_scope_nodes
 from dbt_costgate.models import TIB, EstimateBasis
 
 # Every materialization dbt ships, plus one a user invented. The value is what
@@ -93,6 +93,27 @@ def test_seed_and_snapshot_resource_types_are_dropped():
         make_node("m"),
     )
     assert list(model_nodes(manifest)) == ["model.pkg.m"]
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "expected"),
+    [
+        ("seed", "seeds are not priced"),
+        ("snapshot", "snapshots are not priced"),
+        ("test", "tests are not priced"),
+        ("analysis", "analyses are not priced"),
+        ("operation", "operations are not priced"),
+    ],
+)
+def test_each_unpriced_resource_type_is_named_in_plain_english(resource_type, expected):
+    """The reason is built from a spelled-out plural, not from `type + "s"`.
+
+    Appending the letter told anyone with a changed analysis that "analysiss are
+    not priced" — in the one sentence whose job is to convince them the tool
+    recognised what it was looking at.
+    """
+    manifest = make_manifest(make_node("thing", resource_type=resource_type))
+    assert list(out_of_scope_nodes(manifest).values()) == [expected]
 
 
 def test_a_materialized_view_is_priced_like_a_view_but_says_so(tmp_path: Path, capsys):

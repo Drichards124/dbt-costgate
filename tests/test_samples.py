@@ -248,3 +248,44 @@ def test_the_documented_image_tag_matches_the_version_we_ship():
         if pinned != {f"v{__version__}"}:
             stale.append(f"{site} pulls {sorted(pinned)}, package version is {__version__}")
     assert not stale, "release prep missed a site:\n  " + "\n  ".join(stale)
+
+
+# --- documented vocabulary --------------------------------------------------
+#
+# Words the tool puts in front of a user have to be findable in the pages it
+# ships. They were not: `snapshot`, `seed`, `materialized view` and
+# `multi-statement` each appeared in zero shipped pages while the tool printed
+# all four, so a reader who hit one had nowhere to look it up.
+#
+# That gap is silent by construction — adding a resource type or a warning breaks
+# nothing and fails no test — so the vocabulary is derived from the code here
+# rather than listed. A new entry in `_UNPRICED_TYPES`, a new literal warning in
+# `sql_warnings`, or a new `BASIS_LABELS` row fails this until someone writes the
+# paragraph that explains it.
+
+_REFERENCE_DOCS = ["docs/usage.md", "docs/explained.md"]
+
+# The lead of each warning literal — the part before the em dash, which is the
+# phrase a reader sees at the start of the flag and would search for.
+_WARNING_LEAD = __import__("re").compile(r'"([a-z][a-z -]*?) — ')
+
+
+def _user_vocabulary() -> list[str]:
+    import inspect
+
+    from dbt_costgate import artifacts
+    from dbt_costgate.models import BASIS_LABELS
+
+    terms = list(artifacts._UNPRICED_TYPES.values())
+    terms += _WARNING_LEAD.findall(inspect.getsource(artifacts.sql_warnings))
+    terms += [label.warning.split(" — ")[0] for label in BASIS_LABELS.values()]
+    return sorted(set(terms))
+
+
+@pytest.mark.parametrize("term", _user_vocabulary())
+def test_every_word_the_tool_says_is_explained_in_the_reference_docs(term: str):
+    prose = "\n".join((ROOT / doc).read_text("utf-8") for doc in _REFERENCE_DOCS).lower()
+    assert term in prose, (
+        f"the tool prints {term!r} and no reference page mentions it, so a reader who "
+        f"hits it has nowhere to look. Explain it in one of: {', '.join(_REFERENCE_DOCS)}"
+    )
