@@ -526,7 +526,7 @@ The tool never leaves one out silently. When your change touches one, it says so
 on stderr and carries on with the rest of the report:
 
 ```
-dbt-costgate: dim_customers_snapshot changed but is not priced — snapshots are not priced.
+dbt-costgate: dim_customers_snapshot changed but is not in the report — snapshots are not priced.
 ```
 
 Naming one in `--select` gets the same line, and the run still exits 0 with the

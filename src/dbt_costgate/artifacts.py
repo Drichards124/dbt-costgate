@@ -137,7 +137,10 @@ def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
             if resource_type in _UNPRICED_TYPES:
                 out[name] = f"{_UNPRICED_TYPES[resource_type]} are not priced"
         elif node.get("language", "sql") != "sql":
-            out[name] = "Python models are not priced — dbt-costgate estimates SQL scans"
+            # Semicolon, not a dash: this reason is composed into a sentence that
+            # already spends its em dash joining the two halves, and a second one
+            # inside the reason left the reader with three clauses and no hierarchy.
+            out[name] = "Python models are not priced; dbt-costgate estimates SQL scans"
         elif config.get("materialized") == "ephemeral":
             out[name] = (
                 "ephemeral models have no relation of their own; their SQL is inlined into "

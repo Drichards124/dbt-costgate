@@ -493,13 +493,22 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         baseline_manifest if baseline_nodes is not None and eff_baseline else None,
         selection.paths,
     )
+    # "not in the report" rather than "not priced", because the reasons say "not
+    # priced" themselves: the pair read "country_codes changed but is not priced
+    # — seeds are not priced", which states its one fact twice and reads like a
+    # template nobody assembled. This half says what happened, the reason says
+    # why. It is also the more accurate half for an ephemeral, whose cost really
+    # is priced — in the rows of the models that inline it.
     for name, reason in sorted(touched.items()):
-        print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
+        print(f"dbt-costgate: {name} changed but is not in the report — {reason}.", file=sys.stderr)
     # The --select equivalent. Same stream and same reason: it belongs beside the
     # figures, not among them, so it cannot reach a pull-request comment looking
     # like one.
     for name, reason in sorted(selection.unpriced.items()):
-        print(f"dbt-costgate: {name} was selected but is not priced — {reason}.", file=sys.stderr)
+        print(
+            f"dbt-costgate: {name} was selected but is not in the report — {reason}.",
+            file=sys.stderr,
+        )
 
     diff_mode = baseline_nodes is not None
     if runner is None:

@@ -9,10 +9,28 @@ including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
 ## [Unreleased]
 
+### Changed
+
+- **The line about a resource dbt-costgate does not price no longer says its one
+  fact twice.** It read *"country_codes changed but is not priced — seeds are not
+  priced"*. The first half now says what happened and the second says why:
+
+  ```
+  dbt-costgate: country_codes changed but is not in the report — seeds are not priced.
+  ```
+
+  Same for the `--select` form (*"… was selected but is not in the report — …"*).
+  Grep for `is not priced` still matches; grep for the full old sentence does not.
+  It is also the more accurate wording for an ephemeral model, whose cost really
+  is priced — in the rows of the models that inline it.
+
 ### Fixed
 
 - **A changed analysis is now told that "analyses are not priced"**, rather than
   "analysiss are not priced". The plural was built by adding a letter.
+- **A changed Python model's explanation no longer runs two dashes together.**
+  It was *"… is not priced — Python models are not priced — dbt-costgate
+  estimates SQL scans"*; the second dash is now a semicolon.
 
 ### Docs
 

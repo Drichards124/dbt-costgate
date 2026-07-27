@@ -211,7 +211,7 @@ def test_a_change_to_an_unpriced_node_says_so_rather_than_nothing(
     )
     err = capsys.readouterr().err
     assert code == 0
-    assert "other changed but is not priced" in err
+    assert "other changed but is not in the report" in err
     assert expected in err
 
 
@@ -247,7 +247,7 @@ def test_select_naming_an_unpriced_node_still_reports_the_models_beside_it(
     out, err = capsys.readouterr()
     assert code == 0
     assert "kept" in out  # the model that could be priced still gets its row
-    assert "other was selected but is not priced" in err
+    assert "other was selected but is not in the report" in err
     assert expected in err
 
 
@@ -308,7 +308,42 @@ def test_an_unpriced_node_is_named_even_when_models_were_estimated_too(tmp_path:
     captured = capsys.readouterr()
     assert code == 0
     assert [m["name"] for m in json.loads(captured.out)["models"]] == ["kept"]
-    assert "orders_snapshot changed but is not priced" in captured.err
+    assert "orders_snapshot changed but is not in the report" in captured.err
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"resource_type": "seed"},
+        {"resource_type": "snapshot"},
+        {"resource_type": "test"},
+        {"resource_type": "analysis"},
+        {"resource_type": "operation"},
+        {"language": "python"},
+        {"materialized": "ephemeral"},
+    ],
+)
+def test_the_unpriced_line_never_states_its_one_fact_twice(tmp_path: Path, capsys, spec):
+    """The half that says what happened and the half that says why used to say
+    the same thing: "other changed but is not priced — seeds are not priced".
+
+    Guarded per kind rather than per phrasing, because the doubling came from
+    composing a fixed lead-in with reasons written separately — so it returns the
+    moment either side is edited without reading the other. The em dash is
+    counted for the same reason: a reason with one of its own left the sentence
+    with three clauses and no hierarchy.
+    """
+    target = write_target(
+        tmp_path,
+        make_manifest(make_node("kept", compiled_code="KEPT"), make_node("other", **spec)),
+    )
+    main(
+        ["check", "--current", str(target), "--select", "kept,other"],
+        runner=FakeDryRunner({"KEPT": TIB}),
+    )
+    line = next(ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("dbt-costgate:"))
+    assert line.count("not priced") <= 1, f"says it twice: {line}"
+    assert line.count("—") == 1, f"more than one em dash: {line}"
 
 
 def test_a_run_with_nothing_at_all_changed_stays_quiet(tmp_path: Path, capsys):
