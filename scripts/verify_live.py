@@ -19,9 +19,16 @@ Cost: every query is `dry_run=True`. Nothing executes and no bytes are billed.
 It reads only `bigquery-public-data`, so it needs no tables of your own — just a
 project with the BigQuery API enabled to bill the (free) dry-run jobs to.
 
-What it cannot prove: that the retry predicate fires on a real 429 or 503. You
-cannot make BigQuery rate-limit you on demand. The predicate is checked against
-real exception *instances* instead, which is a weaker claim, honestly labelled.
+The retry path is driven rather than asserted. BigQuery cannot be made to
+rate-limit on demand, so a synthetic HTTP response is injected at the wire and
+google-cloud-bigquery builds the exception itself — everything above the socket
+is the real library and the real code path. Asserting the predicate and the
+deadline instead is what let a 5-second deadline run for 179 seconds while
+reporting the wrong error kind.
+
+What it still cannot prove: that BigQuery's own 429s and 503s look like the
+injected ones. They are shaped from real error bodies, but nobody has watched
+this recover from an actual incident.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time as _time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -40,6 +48,71 @@ from dbt_costgate.bigquery import BigQueryDryRunner  # noqa: E402
 from dbt_costgate.models import ErrorKind  # noqa: E402
 
 PUBLIC = "`bigquery-public-data.usa_names.usa_1910_2013`"
+
+# message, RPC status, and the `reason` google-cloud-bigquery reads out of
+# errors[]. A real BigQuery error body always carries `reason`; omit it and the
+# client raises KeyError before dbt-costgate sees anything — a fault in the
+# fixture that reads exactly like a fault in the tool.
+_ERROR_BODIES = {
+    503: ("The service is currently unavailable.", "UNAVAILABLE", "backendError"),
+    400: ("Syntax error: unexpected token.", "INVALID_ARGUMENT", "invalidQuery"),
+}
+
+
+class _wire:
+    """Fail the first `n` job submissions with `status`, then let them through.
+
+    Injected at the HTTP layer on purpose. Patching `dry_run` or the client would
+    test our own stub; returning a real response makes google-cloud-bigquery
+    construct the exception the way production does, and everything above the
+    socket stays real.
+    """
+
+    def __init__(self, runner, status: int, n: int):
+        runner._ensure_client()
+        self.session = runner._client._http
+        self.status, self.n = status, n
+        self.attempts = 0
+        self._injected = 0
+
+    def _response(self, method: str, url: str):
+        import requests
+
+        message, rpc, reason = _ERROR_BODIES[self.status]
+        resp = requests.Response()
+        resp.status_code, resp.url, resp.reason = self.status, url, rpc
+        resp._content = json.dumps(
+            {
+                "error": {
+                    "code": self.status,
+                    "message": message,
+                    "status": rpc,
+                    "errors": [{"message": message, "domain": "global", "reason": reason}],
+                }
+            }
+        ).encode()
+        resp.headers["Content-Type"] = "application/json"
+        req = requests.PreparedRequest()
+        req.method, req.url = method, url
+        resp.request = req
+        return resp
+
+    def __enter__(self):
+        self._original = self.session.request
+
+        def request(method, url, *a, **kw):
+            if "/jobs" in url:
+                self.attempts += 1
+                if self._injected < self.n:
+                    self._injected += 1
+                    return self._response(method, url)
+            return self._original(method, url, *a, **kw)
+
+        self.session.request = request
+        return self
+
+    def __exit__(self, *exc):
+        self.session.request = self._original
 
 
 class Checks:
@@ -195,6 +268,51 @@ def edge_checks(check: Checks, runner: BigQueryDryRunner, project: str) -> None:
         return got == 60.0, f"deadline={got}"
 
     check("the retry deadline is the documented 60s", deadline)
+
+    # Asserting the predicate and the deadline above is not the same as watching
+    # the machinery run, and the difference was not academic: both checks passed
+    # while a 5-second deadline took 179 seconds and reported the wrong kind. The
+    # three below drive it. A synthetic HTTP response goes in at the wire, so
+    # google-cloud-bigquery builds the exception itself and everything above the
+    # socket is the real library and the real dbt-costgate path.
+    check.section("4b. the retry machinery, actually running")
+
+    def recovers():
+        with _wire(runner, 503, 1) as w:
+            r = runner.dry_run(f"SELECT state FROM {PUBLIC}")
+        return r.ok and w.attempts == 2, (
+            f"1 injected 503 then real BigQuery: {w.attempts} attempts, "
+            f"ok={r.ok}, bytes={r.total_bytes:,}"
+            if r.ok
+            else f"did not recover ({r.error_kind})"
+        )
+
+    check("a real 503 is retried and the dry-run recovers", recovers)
+
+    def not_retried():
+        with _wire(runner, 400, 1) as w:
+            r = runner.dry_run(f"SELECT state FROM {PUBLIC}")
+        ok = w.attempts == 1 and r.error_kind is ErrorKind.INVALID_SQL
+        return ok, f"a permanent 400: {w.attempts} attempt(s) -> {r.error_kind}"
+
+    def gives_up():
+        # Bounded, and named correctly when it gives up. Both halves failed
+        # before: `job_retry` defaulted to a 2400s deadline that outranked ours,
+        # and the RetryError that escapes classified as OTHER.
+        brief = BigQueryDryRunner(project=project, deadline_seconds=5.0)
+        brief._ensure_client()
+        started = _time.monotonic()
+        with _wire(brief, 503, 10**6) as w:
+            r = brief.dry_run(f"SELECT state FROM {PUBLIC}")
+        elapsed = _time.monotonic() - started
+        ok = r.error_kind is ErrorKind.TRANSIENT and elapsed < 30
+        return ok, (
+            f"unending 503 on a 5s deadline: gave up after {elapsed:.1f}s / "
+            f"{w.attempts} attempts -> {r.error_kind}"
+        )
+
+    check("a permanent 400 is not retried at all", not_retried)
+    check("an unending 503 gives up inside the deadline, as TRANSIENT", gives_up)
 
     check.section("5. a credential failure is reported, not raised")
 
@@ -374,7 +492,7 @@ def main() -> int:
     end_to_end(check, project)
 
     # A run that checked almost nothing must not read as a green tick.
-    expected = 18
+    expected = 21
     if len(check.rows) < expected:
         print(f"\nINCOMPLETE: {len(check.rows)} checks ran, expected {expected}.", file=sys.stderr)
         return 2

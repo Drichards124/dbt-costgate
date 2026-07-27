@@ -46,7 +46,9 @@ class _Client:
         self.calls = []
 
     def query(self, sql, job_config=None, retry=None, **kwargs):
-        self.calls.append({"sql": sql, "job_config": job_config, "retry": retry})
+        # kwargs recorded too: `job_retry` lives there, and it going unrecorded is
+        # part of why a 2400-second default outranked our deadline unnoticed.
+        self.calls.append({"sql": sql, "job_config": job_config, "retry": retry, **kwargs})
         if self._raises is not None:
             raise self._raises
         return self._job
@@ -76,6 +78,69 @@ class BadRequest(Exception):
 
 class ServiceUnavailable(Exception):
     pass
+
+
+class RetryError(Exception):
+    """What google-api-core raises when a Retry gives up — the shape the client
+    actually produces, as opposed to the bare exceptions above.
+
+    Every stand-in here is a class the *client* raises. This one was missing, and
+    its absence is why a transient failure that survived the retries classified
+    as OTHER for as long as the retry has existed: the tests fed `categorize` a
+    bare `ServiceUnavailable`, which is what fails *inside* the retry, never what
+    escapes it.
+    """
+
+    def __init__(self, message, cause):
+        super().__init__(message)
+        self.cause = cause
+
+
+def _gave_up(last):
+    return RetryError(
+        f"Deadline of 60.0s exceeded while calling target function, last exception: {last}", last
+    )
+
+
+def test_a_transient_failure_that_outlives_the_retries_is_transient():
+    result = _runner(_Client(raises=_gave_up(ServiceUnavailable("503 backend error")))).dry_run(
+        "select 1", SELF_RELATION
+    )
+    assert result.error_kind is ErrorKind.TRANSIENT
+
+
+def test_a_retry_error_is_classified_by_what_it_wrapped():
+    # Not hardcoded to TRANSIENT: the wrapped exception is the real answer, and
+    # saying so keeps this correct if the predicate ever widens.
+    for last, expected in (
+        (ServiceUnavailable("503 backend error"), ErrorKind.TRANSIENT),
+        (NotFound("404 Not found: Table proj:raw.upstream"), ErrorKind.UPSTREAM_MISSING),
+        (Forbidden("403 Access Denied"), ErrorKind.PERMISSION),
+    ):
+        assert categorize(_gave_up(last), SELF_RELATION)[0] is expected
+
+
+def test_a_retry_error_with_nothing_wrapped_is_still_transient():
+    err = RetryError("Deadline of 60.0s exceeded while calling target function", None)
+    assert categorize(err, None)[0] is ErrorKind.TRANSIENT
+
+
+def test_the_dry_run_disables_job_level_retry():
+    """`Client.query` carries two retries, and only one of them is ours.
+
+    `job_retry` defaults to a 2400-second deadline and re-drives the whole job,
+    which silently outranked `deadline_seconds`: measured against real BigQuery,
+    a 5-second deadline ran for 179 seconds over 42 attempts. A dry-run creates
+    no job to re-drive, so the answer is to switch it off rather than to give it
+    a matching deadline.
+
+    Asserted on the call rather than on `_retry._deadline`, because asserting the
+    attribute is exactly what passed while the behaviour was unbounded.
+    """
+    client = _Client(job=_Job(4096, "US"))
+    _runner(client).dry_run("select 1")
+    assert "job_retry" in client.calls[0], "job_retry was not passed at all"
+    assert client.calls[0]["job_retry"] is None
 
 
 def test_a_successful_dry_run_returns_bytes_and_location():
