@@ -15,7 +15,9 @@ from dbt_costgate.models import (
     Status,
     Verdict,
     format_money,
+    format_money_pair,
     format_pct,
+    humanize_bytes,
 )
 
 EXIT_OK = 0
@@ -147,12 +149,15 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
     # Absolute ceilings: gate the total per-run cost/scan, not the increase.
     if thr.max_usd_total is not None and d.usd_current is not None:
         if d.usd_current > thr.max_usd_total:
-            out.append(
-                f"{d.name}: {format_money(d.usd_current, cur)}/run exceeds cap "
-                f"{format_money(thr.max_usd_total, cur)}"
-            )
+            spent, cap = format_money_pair(d.usd_current, thr.max_usd_total, cur)
+            out.append(f"{d.name}: {spent}/run exceeds cap {cap}")
     if thr.max_tib_total is not None and d.bytes_current is not None:
-        tib = d.bytes_current / TIB
-        if tib > thr.max_tib_total:
-            out.append(f"{d.name}: {tib:,.2f} TiB/run exceeds cap {thr.max_tib_total:,.2f} TiB")
+        if d.bytes_current / TIB > thr.max_tib_total:
+            # Both sides through the same humanizer the table uses. The cap is
+            # configured in TiB but rendered in whatever unit makes it legible
+            # beside the scan it capped — comparing the two is the point of the
+            # sentence, and `0.00 TiB` next to `0.00 TiB` compares nothing.
+            scanned = humanize_bytes(d.bytes_current)
+            ceiling = humanize_bytes(int(thr.max_tib_total * TIB))
+            out.append(f"{d.name}: {scanned}/run exceeds cap {ceiling}")
     return out

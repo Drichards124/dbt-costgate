@@ -65,3 +65,9 @@ select = ["E", "F", "I", "UP", "B", "S"]
 # Source suppressions are per-line with a reason at the call site instead.
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S603", "S607", "S105", "S608"]
+# `scripts/verify_live.py` is a test harness that happens to live outside tests/.
+#   S608 — it builds malformed SQL deliberately, so BigQuery will reject it and
+#          the rejection can be classified. Broken SQL is the fixture.
+#   S603 — it runs this repo's own CLI as a subprocess, on arguments it builds
+#          itself. S602 (shell=True) is not suppressed here or anywhere.
+"scripts/verify_live.py" = ["S603", "S608"]

@@ -3,8 +3,61 @@
 All notable, user-visible changes to `dbt-costgate` are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-(currently pre-1.0: minor versions may contain breaking changes, noted here).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+From 1.0 on, a breaking change means a new major version; releases up to and
+including 0.11.0 were pre-1.0, where minor versions could and did break things.
+
+## [1.0.0] - 2026-07-27
+
+**1.0 because the last thing standing in its way is done.** The v0.11.0 notes
+said the number was blocked on one thing: every test faked
+`google.cloud.bigquery.Client`, so the one part of this tool that talks to a
+warehouse had never met a warehouse. It has now — see
+[docs/qa/live-bigquery-2026-07-27.md](docs/qa/live-bigquery-2026-07-27.md). The
+dry-run response parses, the error classification holds against live BigQuery
+exceptions, and an end-to-end run's byte counts match a direct dry-run exactly.
+It also turned up the bug below, which is the argument for doing it.
+
+Nothing here changes a gated figure, a threshold, an exit code or a verdict.
+1.0 is a statement about confidence and about the promise that comes with it —
+from here, breaking changes wait for 2.0.
+
+### Fixed
+
+- **A mistyped dataset name no longer tells you to log in again.** BigQuery
+  answers `403` — not `404` — for a dataset or project that does not exist, so a
+  typo used to end the run with `could not estimate any model (check
+  credentials/permissions). Try gcloud auth application-default login` and exit
+  2. The exit code is unchanged, but both messages now name the other cause:
+
+  ```
+  not estimated — BigQuery refused the dry-run — either it is not allowed, or
+  the dataset or project does not exist
+  ```
+
+  Check the names in your `--select` and your model SQL before reaching for IAM.
+
+- **`max_tib_total` and `max_usd_total` breaches now name numbers you can tell
+  apart.** Both sides were rendered at two decimal places, so a small cap
+  produced a breach line that compared a number to itself:
+
+  ```
+  - fct_names: 0.00 TiB/run exceeds cap 0.00 TiB
+  - fct_names: USD 0.00/run exceeds cap USD 0.00
+  ```
+
+  A 1 GiB ceiling (`max_tib_total: 0.001`) is an ordinary thing to set and lands
+  right in that range. Byte figures now use the same units as the table, and
+  money widens its decimals only when two places would round an amount away:
+
+  ```
+  - fct_names: 147.61 MiB/run exceeds cap 104.86 MiB
+  - fct_names: USD 0.0009/run exceeds cap USD 0.0001
+  ```
+
+  Ordinary caps are unchanged — `USD 0.84/run exceeds cap USD 0.50` still reads
+  at two places. Only the wording moved; gating, exit codes and verdicts are
+  identical.
 
 ## [0.11.0] - 2026-07-26
 

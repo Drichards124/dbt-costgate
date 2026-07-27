@@ -28,6 +28,62 @@ def format_money(value: float | None, currency: str, *, signed: bool = False) ->
     return f"{currency} {value:+,.2f}" if signed else f"{currency} {value:,.2f}"
 
 
+def format_money_pair(actual: float, cap: float, currency: str) -> tuple[str, str]:
+    """Two amounts rendered so a reader can tell them apart.
+
+    Two decimals is right for the table, where a column of amounts has to line
+    up, and wrong for a breach message, where the whole job of the sentence is
+    to contrast one number with another. At sub-cent amounts the default gives
+    `USD 0.00/run exceeds cap USD 0.00` — a real, correct gate failure that
+    explains nothing.
+
+    Sub-cent is ordinary here, not an edge case: on-demand BigQuery is a few
+    dollars a TiB, so a model scanning a hundred megabytes costs a fraction of a
+    penny, and a team capping a model at a cent lands squarely in this range.
+
+    Same defect `format_pct` was written to fix (`+0% exceeds 0%`), and the same
+    remedy: let the precision follow what the number needs. Widen only until the
+    numbers read properly, so the common case keeps the familiar two places.
+
+    "Read properly" is two conditions, not one. The strings must differ, and
+    neither may collapse a non-zero amount to zero — stopping at the first is how
+    you get `USD 0.001/run exceeds cap USD 0.000`, which is distinguishable and
+    still tells the reader their cap was nothing.
+    """
+
+    def vanishes(value: float, places: int) -> bool:
+        """A real amount that this many decimals would round away to nothing."""
+        return value != 0 and float(f"{value:.{places}f}") == 0
+
+    for places in (2, 3, 4, 5, 6):
+        rendered = (f"{currency} {actual:,.{places}f}", f"{currency} {cap:,.{places}f}")
+        legible = not vanishes(actual, places) and not vanishes(cap, places)
+        if rendered[0] != rendered[1] and legible:
+            return rendered
+    return rendered
+
+
+def humanize_bytes(n: int | None) -> str:
+    """`147.61 MiB`. Scales to the largest unit that leaves a number below 1024.
+
+    Beside `format_money` for the same reason it is: the report renders a model's
+    scan and `policy.py` renders the ceiling it broke through, and the two have
+    to agree. `policy.py` used to hand-format its own `{tib:,.2f} TiB`, which is
+    how `0.00 TiB/run exceeds cap 0.00 TiB` got out — a 1 GiB cap is an ordinary
+    thing to set and rounds to nothing in TiB.
+    """
+    if n is None:
+        return "—"
+    step = 1024.0
+    units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+    size = float(n)
+    for unit in units:
+        if size < step or unit == units[-1]:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.2f} {unit}"
+        size /= step
+    return f"{size:.2f} PiB"  # pragma: no cover
+
+
 def format_pct(value: float | None, *, signed: bool = True) -> str:
     """Render a percentage at whatever precision it actually needs: `+264%`,
     `+0.4%`, `0.35%`.
@@ -166,7 +222,16 @@ ERROR_KIND_REASONS: dict[ErrorKind, str] = {
         "target for the full-refresh estimate"
     ),
     ErrorKind.UPSTREAM_MISSING: "an upstream table it reads has not been materialized",
-    ErrorKind.PERMISSION: "BigQuery denied permission for the dry-run",
+    # BigQuery answers 403 both for a table it will not let you read and for a
+    # dataset or project that does not exist — deliberately, so a stranger cannot
+    # map an account by watching 404s turn into 403s. Its own message hedges
+    # ("or perhaps it does not exist"); this one used to drop the hedge and say
+    # only "denied permission", which sends someone to IAM when the real fix is a
+    # typo in a dataset name. Verified against real BigQuery, 2026-07-27.
+    ErrorKind.PERMISSION: (
+        "BigQuery refused the dry-run — either it is not allowed, or the dataset "
+        "or project does not exist"
+    ),
     ErrorKind.INVALID_SQL: "BigQuery rejected the compiled SQL",
     ErrorKind.TRANSIENT: "BigQuery was unavailable and the retries ran out",
     ErrorKind.OTHER: "the dry-run failed",

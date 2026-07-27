@@ -90,6 +90,22 @@ def test_a_partly_failed_run_reports_which_models_are_missing(tmp_path: Path, ca
     assert denied["error"]
 
 
+def test_a_wholly_failed_run_does_not_blame_credentials_on_its_own(tmp_path: Path, capsys):
+    # This line used to say "check credentials/permissions. Try `gcloud auth
+    # application-default login`" for every operational failure. A mistyped
+    # dataset name comes back 403 from real BigQuery, so the advice was wrong and
+    # exit 2 made it loud. It may still offer re-auth; it may not lead with it.
+    target = write_target(tmp_path, make_manifest(make_node("denied", compiled_code="DENIED")))
+    code = main(
+        ["check", "--current", str(target), "--select", "denied"],
+        runner=FakeDryRunner({"DENIED": ErrorKind.PERMISSION}),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "does not exist" in err
+    assert "gcloud auth application-default login" in err
+
+
 def test_the_report_can_be_written_to_a_file(tmp_path: Path):
     target = write_target(tmp_path, make_manifest(make_node("m", compiled_code="SQL")))
     out = tmp_path / "report.json"

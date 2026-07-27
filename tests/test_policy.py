@@ -135,6 +135,33 @@ def test_absolute_tib_total_breaches():
     assert "TiB" in v.breaches[0]
 
 
+def test_a_small_tib_cap_breach_names_two_numbers_a_reader_can_compare():
+    # A 1 GiB ceiling is an ordinary thing to set, and both sides used to be
+    # hand-formatted as `{tib:,.2f} TiB` — so a real breach printed
+    # "0.00 TiB/run exceeds cap 0.00 TiB", comparing a number to itself. Found by
+    # running the CLI against real BigQuery, where models this size are normal.
+    cfg = Config(thresholds=Thresholds(max_tib_total=1 / 1024))  # 1 GiB
+    v = policy.evaluate([_delta(bytes_current=3 * 1024**3)], cfg)  # 3 GiB
+    assert v.status == Status.FAIL
+    assert v.breaches[0] == "m: 3.00 GiB/run exceeds cap 1.00 GiB"
+
+
+def test_a_sub_cent_usd_cap_breach_widens_until_both_amounts_are_real():
+    # Two decimals gives "USD 0.00 exceeds cap USD 0.00"; stopping at the first
+    # precision where the strings merely differ gives "USD 0.001 exceeds cap
+    # USD 0.000", which is distinguishable and still reads as a cap of nothing.
+    cfg = Config(thresholds=Thresholds(max_usd_total=0.0001))
+    v = policy.evaluate([_delta(usd_baseline=None, usd_current=0.00094)], cfg)
+    assert v.breaches[0] == "m: USD 0.0009/run exceeds cap USD 0.0001"
+
+
+def test_an_ordinary_cap_breach_still_reads_at_two_places():
+    # The widening is for the case that needs it and nowhere else.
+    cfg = Config(thresholds=Thresholds(max_usd_total=0.50))
+    v = policy.evaluate([_delta(usd_baseline=None, usd_current=0.84)], cfg)
+    assert v.breaches[0] == "m: USD 0.84/run exceeds cap USD 0.50"
+
+
 def test_absolute_caps_pass_under_cap():
     cfg = Config(thresholds=Thresholds(max_usd_total=100.0, max_tib_total=100.0))
     v = policy.evaluate([_delta(bytes_current=TIB)], cfg)
