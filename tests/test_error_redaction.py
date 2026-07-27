@@ -101,3 +101,13 @@ def test_every_error_kind_has_a_reason_a_report_may_print():
     assert set(ERROR_KIND_REASONS) == set(ErrorKind)
     for kind, reason in ERROR_KIND_REASONS.items():
         assert reason and not reason.startswith("not estimated"), kind
+
+
+def test_the_403_reason_admits_the_name_might_just_be_wrong():
+    # Real BigQuery returns 403, not 404, for a dataset or project that does not
+    # exist — so this reason cannot claim the cause is access. Saying only
+    # "denied permission" sent a mistyped dataset name to IAM. Both causes must
+    # stay named; see the comment on the entry itself.
+    reason = ERROR_KIND_REASONS[ErrorKind.PERMISSION].lower()
+    assert "does not exist" in reason
+    assert "dataset" in reason and "project" in reason

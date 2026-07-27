@@ -28,6 +28,7 @@ from dbt_costgate.models import (
     Status,
     format_money,
     format_pct,
+    humanize_bytes,
 )
 
 _DRYRUN_NOTE = "Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown."
@@ -75,19 +76,6 @@ def _free_tier_note(d: PricingDisclosure) -> str:
 def _tib(value: float) -> str:
     """A TiB allowance, trailing zeros trimmed: `1 TiB`, `2.5 TiB`."""
     return f"{value:,.2f}".rstrip("0").rstrip(".") + " TiB"
-
-
-def humanize_bytes(n: int | None) -> str:
-    if n is None:
-        return "—"
-    step = 1024.0
-    units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
-    size = float(n)
-    for unit in units:
-        if size < step or unit == units[-1]:
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.2f} {unit}"
-        size /= step
-    return f"{size:.2f} PiB"  # pragma: no cover
 
 
 # One money formatter for the whole project, shared with policy.py's breach

@@ -569,7 +569,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/dbt-costgate@v0.11.0
+      - uses: Drichards124/dbt-costgate@v1.0.0
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .dbt-costgate.yml
@@ -599,7 +599,7 @@ turns it into someone else's review problem.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/Drichards124/dbt-costgate
-    rev: v0.11.0
+    rev: v1.0.0
     hooks:
       - id: dbt-costgate
 ```
@@ -642,8 +642,8 @@ The repository ships a `Dockerfile`, so teams on GitLab CI, Buildkite, Jenkins o
 anything else can run the same check without a Python environment of their own.
 
 ```bash
-docker pull ghcr.io/drichards124/dbt-costgate:v0.11.0
-docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v0.11.0 check
+docker pull ghcr.io/drichards124/dbt-costgate:v1.0.0
+docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v1.0.0 check
 ```
 
 Every release publishes `ghcr.io/drichards124/dbt-costgate` at both `:vX.Y.Z` and

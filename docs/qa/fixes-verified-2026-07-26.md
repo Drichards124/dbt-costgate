@@ -107,6 +107,14 @@ network is the one thing a stand-in cannot vouch for. Whether BigQuery's actual
 responses match the fake's shape, and whether the retry predicate fires on
 genuine 429/503s, needs one run against a real project before calling this 1.0.
 
+**Answered on 2026-07-27** — see
+[live-bigquery-2026-07-27.md](live-bigquery-2026-07-27.md). The response shape
+and the error classification are confirmed against real BigQuery, and one defect
+came out of it that no fake could have produced. A real 429 or 503 in flight is
+still unobserved: you cannot make BigQuery rate-limit you on demand, so the
+retry predicate is checked against real exception instances instead. That is the
+one caveat that survives.
+
 One narrower caveat from the second pass: `--against <ref>` compiles the ref with
 the project's own adapter, which in this rig is duckdb, so the baseline it
 produces is not shaped like the branch and the run reports a basis mismatch.
