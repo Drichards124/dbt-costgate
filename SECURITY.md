@@ -2,8 +2,15 @@
 
 ## Supported versions
 
-`dbt-costgate` is pre-1.0. Security fixes are applied to the latest released
-`0.x` minor version. Once `1.0` ships, this policy will name a support window.
+Security fixes are applied to the **latest released `1.x` minor version**. Older
+minors are not backported — the upgrade path within a major version is
+non-breaking by policy, so the fix is to move to the current `1.x`.
+
+When `2.0` ships, the final `1.x` minor will keep receiving security fixes for
+**six months** from that date. Pre-1.0 releases (`0.x`) are no longer supported.
+
+This is a small project with one maintainer, and the window above is what can
+actually be honoured rather than what sounds generous.
 
 ## Reporting a vulnerability
 
