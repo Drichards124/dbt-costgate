@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dbt_costgate.config import CONFIG_REFERENCE, Config, Thresholds
+from dbt_costgate.config import CONFIG_REFERENCE, Config, ConfigError, Thresholds
 
 
 def test_load_missing_file_returns_defaults(tmp_path: Path):
@@ -93,7 +93,7 @@ pricing:
 """,
         "utf-8",
     )
-    with pytest.raises(ValueError, match="europe-west3"):
+    with pytest.raises(ConfigError, match="europe-west3"):
         Config.load(None, tmp_path)
 
 
@@ -137,6 +137,7 @@ pricing:
   region: europe-west3
   usd_per_tib: 5.0
   currency: EUR
+  free_tib_per_month: 1
   regions:
     US: 6.0
 thresholds:
@@ -187,5 +188,5 @@ def test_currency_absent_is_none_so_the_table_default_applies(tmp_path: Path):
 @pytest.mark.parametrize("bad", ["$", "Euro", "US", "USDD", ""])
 def test_a_currency_that_is_not_an_iso_code_is_rejected(tmp_path: Path, bad: str):
     (tmp_path / ".dbt-costgate.yml").write_text(f'pricing:\n  currency: "{bad}"\n', "utf-8")
-    with pytest.raises(ValueError, match="ISO 4217"):
+    with pytest.raises(ConfigError, match="ISO 4217"):
         Config.load(None, tmp_path)

@@ -28,6 +28,34 @@ def format_money(value: float | None, currency: str, *, signed: bool = False) ->
     return f"{currency} {value:+,.2f}" if signed else f"{currency} {value:,.2f}"
 
 
+def format_pct(value: float | None, *, signed: bool = True) -> str:
+    """Render a percentage at whatever precision it actually needs: `+264%`,
+    `+0.4%`, `0.35%`.
+
+    Here beside `format_money`, and for the same reason: the report renders a
+    model's growth and `policy.py` renders the limit it exceeded, and the two
+    have to agree. Fixed at zero decimal places in both places, they produced the
+    breach line `+0% exceeds 0%` for a real 0.4% increase over a 0.3% limit —
+    a correct gate failure that read like a bug.
+
+    Precision follows the magnitude, because decimals earn their place at one end
+    of the range and are noise at the other: `+264%` says everything `+263.75%`
+    does, while `+0%` throws away the whole number. Under 1 gets two places, under
+    10 gets one, and everything above is whole.
+
+    Trailing zeros are trimmed by splitting on the decimal point rather than by
+    `rstrip`, which would eat the zeros out of `1,200.00` as well.
+    """
+    if value is None:
+        return "—"
+    size = abs(value)
+    places = 2 if size < 1 else 1 if size < 10 else 0
+    text = f"{value:+,.{places}f}" if signed else f"{value:,.{places}f}"
+    whole, _, frac = text.partition(".")
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac}%" if frac else f"{whole}%"
+
+
 @dataclass(frozen=True)
 class Notice:
     """One run-level advisory, and the id that identifies it in config.
@@ -48,6 +76,57 @@ class EstimateBasis(str, Enum):
     DIRECT = "direct"  # table / view — compiled SQL is the model as-is
     FULL_REFRESH = "full_refresh"  # incremental compiled fresh (no self-reference)
     INCREMENTAL_FORM = "incremental_form"  # incremental compiled against an existing table
+
+
+class SkipReason(str, Enum):
+    """Why a model was not gated — and, crucially, which kind of "not gated".
+
+    `gateable=False` used to mean two unrelated things at once. *The user told us
+    not to gate this model* is a decision the gate should respect. *We could not
+    gate this model* is the gate failing at its one job, and treating the two the
+    same is how a +264% regression passed with five thresholds set to nearly
+    zero: the baseline had been compiled a different way, the comparison was
+    dropped, and the verdict was `PASS`.
+
+    The two groups below are what tells them apart. `is_unchecked` is the line.
+    """
+
+    # Nothing to enforce here.
+    EXCLUDED = "excluded"
+    WARN_ONLY = "warn_only"
+    DELETED = "deleted"  # a removal can only lower cost, so no threshold applies
+    # Failure: the gate wanted to check and could not.
+    NO_COMPILED_SQL = "no_compiled_sql"
+    DRY_RUN_FAILED = "dry_run_failed"
+    NO_BASELINE_SQL = "no_baseline_sql"
+    BASIS_MISMATCH = "basis_mismatch"
+
+    @property
+    def is_unchecked(self) -> bool:
+        return self not in (SkipReason.EXCLUDED, SkipReason.WARN_ONLY, SkipReason.DELETED)
+
+
+# What a report says about a model the gate could not check. Plain language, and
+# each one ends in the thing the reader can do about it.
+#
+# Written without a pronoun for the model, because each of these is used in two
+# frames: after one model's name ("fct_orders_daily: not checked — …") and after
+# a count ("none of the 2 selected models could be gated — …"). "its dry-run"
+# reads correctly in the first and disagrees with the plural in the second.
+SKIP_REASON_MESSAGES: dict[SkipReason, str] = {
+    SkipReason.NO_COMPILED_SQL: "there is no compiled SQL to measure — run `dbt compile`",
+    SkipReason.DRY_RUN_FAILED: (
+        "the dry-run did not return a size, so there is no figure to compare against a threshold"
+    ),
+    SkipReason.NO_BASELINE_SQL: (
+        "the baseline has no compiled SQL to compare against — it must come from "
+        "`dbt compile`, not `dbt parse`"
+    ),
+    SkipReason.BASIS_MISMATCH: (
+        "the baseline and this branch were compiled differently, so their two figures answer "
+        "different questions — recompile the baseline the same way"
+    ),
+}
 
 
 class ErrorKind(str, Enum):
@@ -128,10 +207,18 @@ class ModelEstimate:
     error_kind: ErrorKind | None = None
     error_detail: str | None = None
     is_new: bool = False
+    is_deleted: bool = False
     basis_baseline: EstimateBasis | None = None
     basis_current: EstimateBasis | None = None
     warnings: list[str] = field(default_factory=list)
-    gateable: bool = True
+    # Why this model will not be gated, if it will not. `gateable` is derived
+    # from it rather than set alongside it, so the two cannot disagree about a
+    # model — which is exactly how the reason for skipping got lost.
+    skip_reason: SkipReason | None = None
+
+    @property
+    def gateable(self) -> bool:
+        return self.skip_reason is None
 
     @property
     def name(self) -> str:
@@ -172,21 +259,29 @@ class BasisLabel:
     footnote: str  # the collapsed explanation a report prints once
 
 
+# Written to be read once. The earlier footnotes said "for the rows tagged above,
+# the figure is one run against the table as already built, so it does not gate
+# rebuild cost" — every fact correct, and it takes a second pass to work out that
+# the number on screen is the cheap case and the expensive one is not here at all.
+# Each footnote below now says what the number is, what it is not, and which of
+# the two is bigger, in that order.
 BASIS_LABELS: dict[EstimateBasis, BasisLabel] = {
     EstimateBasis.FULL_REFRESH: BasisLabel(
         tag="full-refresh",
-        warning="incremental — figure is the full-refresh scan",
+        warning="full-refresh — this figure is a full rebuild, not one incremental run",
         footnote=(
-            "full-refresh — for the rows tagged above, the figure is the cost of "
-            "rebuilding the table, not of one incremental run."
+            "full-refresh — rows tagged full-refresh show what it costs to build the whole "
+            "table from scratch. A normal incremental run scans much less, so read this as "
+            "the ceiling rather than the nightly bill."
         ),
     ),
     EstimateBasis.INCREMENTAL_FORM: BasisLabel(
         tag="incremental",
-        warning="incremental — figure is one incremental run, not a rebuild",
+        warning="incremental — this figure is one incremental run, not a full rebuild",
         footnote=(
-            "incremental — for the rows tagged above, the figure is one run against "
-            "the table as already built, so it does not gate rebuild cost."
+            "incremental — rows tagged incremental show one run against a table that "
+            "already exists. A full rebuild scans far more, and nothing here measures it, "
+            "so no threshold on this report can catch a rebuild getting expensive."
         ),
     ),
 }
@@ -215,6 +310,38 @@ class CostDelta:
     # hand-built delta stays constructible, and so an unknown basis leaves a row
     # unlabelled rather than mislabelled.
     basis: EstimateBasis | None = None
+    # Why this model is not gated. `gateable` says *whether*; this says *which
+    # kind*, and the gate needs the difference: a model the user excluded is a
+    # decision, a model that could not be measured is a hole.
+    skip_reason: SkipReason | None = None
+    # In the baseline and gone from the branch. `bytes_current` is 0, so the
+    # delta is the whole of what it used to scan — a saving.
+    is_deleted: bool = False
+    # Whether the two figures can be subtracted at all. Separate from
+    # `skip_reason` because `exclude:` overwrites that one, and it must: a model
+    # whose dry-run always fails has to be acceptable by name. But excluding a
+    # model from *gating* says nothing about whether its baseline and branch were
+    # compiled the same way, and letting the exclusion answer that question put
+    # the incomparable figure straight back into the headline net.
+    comparable: bool = True
+
+    @property
+    def unchecked(self) -> bool:
+        """The gate wanted to check this model and could not."""
+        return self.skip_reason is not None and self.skip_reason.is_unchecked
+
+    @property
+    def grew_from_zero(self) -> bool:
+        """The baseline scanned nothing and this change scans something.
+
+        `pct_delta` is `None` here, because there is no ratio to a zero baseline
+        — which quietly took `max_pct_increase` out of play for exactly the model
+        it should catch hardest. `math.inf` would say it numerically, but
+        `Infinity` is not valid JSON (RFC 8259), so a report carrying it would
+        fail `jq` and any strict parser. The fact travels as this flag instead,
+        and `bytes_baseline: 0` beside `bytes_current: N` already says the rest.
+        """
+        return self.bytes_baseline == 0 and (self.bytes_current or 0) > 0
 
     @property
     def bytes_delta(self) -> int | None:
@@ -252,6 +379,59 @@ class CostDelta:
         return (self.bytes_current - self.bytes_baseline) / self.bytes_baseline * 100.0
 
 
+def estimated(deltas: list[CostDelta]) -> list[CostDelta]:
+    """Models with a usable before/after. Bytes, not dollars, decide this — an
+    unpriced run has real byte deltas and zero-valued money ones.
+
+    A basis mismatch is excluded, and it is the one exclusion that is not about
+    policy. `exclude` and `warn_only` say a model must not *fail the gate*; the
+    model still spends money, so it belongs in the total. A basis mismatch says
+    the two numbers cannot be subtracted at all — and having printed exactly that
+    warning, the report went on to headline `Net saving: USD 4.31/run`, a single
+    incremental run taken off a full rebuild.
+
+    Read off `comparable`, not `skip_reason`, because `exclude:` overwrites the
+    reason — so asking the reason let a user who silenced the gate for one model
+    put that model's incomparable figure back in the total.
+
+    A function over deltas rather than only a `Report` property, because
+    `notices.collect` runs before a `Report` exists.
+    """
+    return [d for d in deltas if d.bytes_delta is not None and d.comparable]
+
+
+def monthly_scan_bytes(deltas: list[CostDelta]) -> int | None:
+    """What these models are projected to scan in a month, or None when that
+    cannot be said.
+
+    The one absolute run-level figure in the codebase: every other total here is
+    a delta. It exists so a team that has declared a free-tier allowance
+    (`pricing.free_tib_per_month`) can be told where this change sits relative to
+    it. Nothing subtracts it — see `PricingDisclosure.free_tib_per_month`.
+
+    None rather than a partial sum when any row is missing a piece, following
+    `net_usd_per_month`: a total that quietly omits some of its rows reads as
+    complete and understates, which is the one direction this tool does not go.
+    In practice the missing piece is `runs_per_month`, i.e. no `run_frequency` in
+    the config, and a notice says so. The `bytes_current` guard is defensive
+    rather than live — `estimated` already drops those rows, since `bytes_delta`
+    is None exactly when `bytes_current` is — but it keeps this correct on its
+    own terms instead of by depending on a filter defined elsewhere.
+
+    None on empty input, matching `net_bytes`. Zero would claim this change
+    scans nothing in a month; None says there is nothing to tell you.
+    """
+    rows = estimated(deltas)
+    if not rows:
+        return None
+    total = 0
+    for d in rows:
+        if d.bytes_current is None or not d.runs_per_month:
+            return None
+        total += d.bytes_current * d.runs_per_month
+    return total
+
+
 class Status(str, Enum):
     PASS = "pass"  # noqa: S105 — a gate verdict, not a credential
     WARN = "warn"
@@ -276,6 +456,19 @@ class PricingDisclosure:
     last_verified: str
     region_sources: dict[str, str] = field(default_factory=dict)  # region -> rate source
     currency: str = "USD"  # ISO 4217 code the applied rates are denominated in
+    # TiB/month the user has declared free, from `pricing.free_tib_per_month`.
+    # None means undeclared, which is the default and prints exactly what it
+    # always did. It rides on the disclosure because it is provenance about the
+    # price rather than a measurement, and because both renderers already read
+    # the disclosure for the header and the footer.
+    #
+    # Declared, never deducted: BigQuery's allowance belongs to the whole billing
+    # account and is drawn down by every query anyone runs, which a dry-run
+    # cannot see. Subtracting it could only mean assuming it is still unspent,
+    # and a gate that forgives the first TiB of a regression on an unverified
+    # assumption is worse than one that over-reports. So this changes what a
+    # report *says* and never what the gate reads.
+    free_tib_per_month: float | None = None
 
     @property
     def priced(self) -> bool:
@@ -311,9 +504,8 @@ class Report:
 
     @property
     def estimated(self) -> list[CostDelta]:
-        """Models with a usable before/after. Bytes, not dollars, decide this —
-        an unpriced run has real byte deltas and zero-valued money ones."""
-        return [d for d in self.deltas if d.bytes_delta is not None]
+        """Models with a usable before/after — see the module-level `estimated`."""
+        return estimated(self.deltas)
 
     @property
     def net_bytes(self) -> int | None:
@@ -334,6 +526,12 @@ class Report:
         if not values or any(v is None for v in values):
             return None
         return sum(values)
+
+    @property
+    def monthly_scan_bytes(self) -> int | None:
+        """What these models are projected to scan in a month — see the
+        module-level `monthly_scan_bytes`."""
+        return monthly_scan_bytes(self.deltas)
 
     @property
     def unestimated_count(self) -> int:

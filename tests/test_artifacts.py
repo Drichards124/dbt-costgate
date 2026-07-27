@@ -197,7 +197,7 @@ def test_select_by_paths_matches_model_file_patch_file_and_macro():
         macros=(make_macro("cents", original_file_path="macros/cents.sql"),),
     )
     nodes = artifacts.model_nodes(manifest)
-    selected = artifacts.select_by_paths(
+    selected, _ = artifacts.select_by_paths(
         nodes,
         ["models/by_sql.sql", "models/schema.yml", "macros/cents.sql"],
         artifacts.macro_index(manifest),
@@ -215,7 +215,7 @@ def test_select_by_paths_follows_a_macro_chain():
         ),
     )
     nodes = artifacts.model_nodes(manifest)
-    selected = artifacts.select_by_paths(
+    selected, _ = artifacts.select_by_paths(
         nodes, ["macros/inner.sql"], artifacts.macro_index(manifest)
     )
     assert selected == ["model.pkg.fct"]
@@ -231,7 +231,7 @@ def test_select_by_paths_ignores_an_unrelated_macro():
     )
     nodes = artifacts.model_nodes(manifest)
     assert (
-        artifacts.select_by_paths(nodes, ["macros/unused.sql"], artifacts.macro_index(manifest))
+        artifacts.select_by_paths(nodes, ["macros/unused.sql"], artifacts.macro_index(manifest))[0]
         == []
     )
 

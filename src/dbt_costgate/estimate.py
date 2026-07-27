@@ -12,7 +12,13 @@ from pathlib import Path
 from dbt_costgate import artifacts
 from dbt_costgate.bigquery import DryRunner
 from dbt_costgate.config import Config
-from dbt_costgate.models import ERROR_KIND_REASONS, CostDelta, ModelEstimate, ModelNode
+from dbt_costgate.models import (
+    ERROR_KIND_REASONS,
+    CostDelta,
+    ModelEstimate,
+    ModelNode,
+    SkipReason,
+)
 from dbt_costgate.pricing import PricingTable
 
 # Not a warehouse failure but a local one, so it carries no ErrorKind. Named
@@ -31,14 +37,18 @@ def estimate_models(
     diff_mode: bool,
     threads: int = 8,
     renames: dict[str, str] | None = None,
-    indirect: set[str] | None = None,
+    notes: dict[str, str] | None = None,
 ) -> list[ModelEstimate]:
+    """`notes` explains, per unique_id, why a model was selected when its own file
+    was not the thing that changed — an upstream macro, a config change, an
+    ephemeral model it inlines. One mechanism rather than one flag per cause, so
+    a model never lands in a report without an explanation beside it."""
     renames = renames or {}
-    indirect = indirect or set()
+    notes = notes or {}
 
     def work(uid: str) -> ModelEstimate:
         return _estimate_one(
-            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames, indirect
+            uid, current_nodes, baseline_nodes, runner, current_dir, diff_mode, renames, notes
         )
 
     if threads <= 1 or len(selected) <= 1:
@@ -58,9 +68,12 @@ def _estimate_one(
     current_dir: Path | None,
     diff_mode: bool,
     renames: dict[str, str],
-    indirect: set[str],
+    notes: dict[str, str],
 ) -> ModelEstimate:
-    node = current_nodes[uid]
+    node = current_nodes.get(uid)
+    if node is None:
+        return _estimate_deleted(baseline_nodes[uid], runner)
+
     base = baseline_nodes.get(uid)
     renamed_base = None
     if base is None:
@@ -74,15 +87,13 @@ def _estimate_one(
     est.warnings = artifacts.sql_warnings(node, current_sql)
     if renamed_base is not None:
         est.warnings.append(f"compared against renamed baseline `{renamed_base.name}`")
-    if uid in indirect:
-        est.warnings.append(
-            "compiled SQL changed but the model file didn't — an upstream macro or a config change"
-        )
+    if uid in notes:
+        est.warnings.append(notes[uid])
 
     if not current_sql:
         est.error_kind = None
         est.error_detail = NO_COMPILED_SQL
-        est.gateable = False
+        est.skip_reason = SkipReason.NO_COMPILED_SQL
         return est
 
     res = runner.dry_run(current_sql, node.relation_name)
@@ -93,7 +104,7 @@ def _estimate_one(
     else:
         est.error_kind = res.error_kind
         est.error_detail = res.error_detail
-        est.gateable = False
+        est.skip_reason = SkipReason.DRY_RUN_FAILED
 
     if diff_mode and base is not None:
         base_sql = base.compiled_code  # baseline: manifest only, no target dir
@@ -115,15 +126,44 @@ def _estimate_one(
             # right answer either way: with no baseline bytes the delta maths read
             # the model as new, so the whole current scan looks like an increase,
             # and a threshold firing on that is firing on a missing measurement.
-            est.gateable = False
+            est.skip_reason = SkipReason.NO_BASELINE_SQL
 
     if est.basis_mismatch:
         est.warnings.append(
             f"mixed basis — baseline is {est.basis_baseline.value}, current is "
             f"{est.basis_current.value}; recompile the baseline the same way"
         )
-        est.gateable = False
+        est.skip_reason = SkipReason.BASIS_MISMATCH
 
+    return est
+
+
+def _estimate_deleted(base: ModelNode, runner: DryRunner) -> ModelEstimate:
+    """A model in the baseline and gone from the branch.
+
+    Its current scan is zero because it no longer runs, so the delta is the whole
+    of what it used to cost — which is the point: removing a model is the most
+    direct cost reduction a change can make, and it used to be invisible.
+
+    Never gated. A deletion cannot increase anything, so no threshold applies to
+    it, and it must not become a "could not check" failure when its baseline
+    happens not to dry-run either.
+    """
+    est = ModelEstimate(node=base, is_deleted=True, skip_reason=SkipReason.DELETED)
+    est.bytes_current = 0
+    est.basis_current = est.basis_baseline = artifacts.detect_basis(base, base.compiled_code)
+    if not base.compiled_code:
+        est.warnings.append("deleted — the baseline has no compiled SQL, so the saving is unpriced")
+        return est
+    res = runner.dry_run(base.compiled_code, base.relation_name)
+    if res.ok:
+        est.bytes_baseline = res.total_bytes
+        if res.location:
+            est.node.location = res.location
+    else:
+        est.warnings.append(
+            "deleted — its baseline could not be dry-run, so the saving is unpriced"
+        )
     return est
 
 
@@ -142,14 +182,23 @@ def build_deltas(
         if est.bytes_baseline is not None:
             usd_baseline, _ = table.usd(est.bytes_baseline, region_hint)
 
-        gateable = est.gateable
+        # A user's exclusion overrides whatever else stopped this model being
+        # gated, and that is what makes `exclude:` a working escape hatch: a
+        # model whose dry-run always fails can be accepted by name instead of
+        # failing every run.
+        skip_reason = est.skip_reason
+        # Read before the override below, because the override is about gating
+        # and this is about whether the subtraction means anything.
+        comparable = est.skip_reason is not SkipReason.BASIS_MISMATCH
         warnings = list(est.warnings)
         if est.name in config.exclude:
-            gateable = False
+            skip_reason = SkipReason.EXCLUDED
             warnings.append("excluded from gating by config")
         elif est.name in config.warn_only:
-            gateable = False
+            skip_reason = SkipReason.WARN_ONLY
             warnings.append("warn-only by config")
+        elif skip_reason is None and est.bytes_current is None:
+            skip_reason = SkipReason.DRY_RUN_FAILED
 
         error = None
         if est.bytes_current is None:
@@ -161,8 +210,11 @@ def build_deltas(
                 unique_id=est.node.unique_id,
                 is_incremental=est.is_incremental,
                 is_new=est.is_new,
+                is_deleted=est.is_deleted,
                 basis=est.basis_current,
-                gateable=gateable and est.bytes_current is not None,
+                gateable=skip_reason is None,
+                skip_reason=skip_reason,
+                comparable=comparable,
                 bytes_baseline=est.bytes_baseline,
                 bytes_current=est.bytes_current,
                 usd_baseline=usd_baseline,
@@ -173,7 +225,16 @@ def build_deltas(
                 runs_per_month=config.runs_per_month(est.name),
             )
         )
-    deltas.sort(key=lambda d: d.usd_per_run_delta or 0.0, reverse=True)
+    # Most expensive first, with bytes as the tie-break rather than an
+    # afterthought: under slot pricing every rate is 0, so every dollar delta is
+    # 0.0 as well, and sorting on money alone left an unpriced report in whatever
+    # order the models arrived in — the 2.91 TiB model listed below the 412 MiB
+    # one. The byte delta ranks a diff, the current scan ranks a run with no
+    # baseline to have a delta from.
+    deltas.sort(
+        key=lambda d: (d.usd_per_run_delta or 0.0, d.bytes_delta or 0, d.bytes_current or 0),
+        reverse=True,
+    )
     return deltas
 
 

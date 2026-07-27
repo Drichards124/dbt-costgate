@@ -19,6 +19,15 @@ _FULL_REFRESH = BASIS_LABELS[EstimateBasis.FULL_REFRESH]
 _INCREMENTAL_FORM = BASIS_LABELS[EstimateBasis.INCREMENTAL_FORM]
 
 
+def _flat(text: str) -> str:
+    """Terminal output with its line breaks collapsed.
+
+    The report wraps prose to the terminal width, so a sentence that is one string
+    in the source arrives split across lines. Assertions about *what* was said run
+    against this; assertions about layout run against the raw output."""
+    return " ".join(text.split())
+
+
 def _report(mode="diff", status=Status.FAIL):
     deltas = [
         CostDelta(
@@ -206,7 +215,10 @@ def test_amounts_carry_their_iso_code_not_a_symbol():
 def test_zero_rate_report_drops_money_and_shows_byte_growth():
     out = report.render_terminal(_unpriced_report())
     assert "bytes only (no per-byte price configured)" in out
-    assert "2.00 TiB → 9.00 TiB" in out
+    # Baseline and current are adjacent columns now, so the before/after reads
+    # across one row rather than through an arrow.
+    row = next(line for line in out.splitlines() if "fct_orders" in line)
+    assert "2.00 TiB" in row and "9.00 TiB" in row
     assert "+350%" in out
     assert "USD" not in out and "$" not in out  # no amount is claimed
     assert "rate is 0 for US" in out
@@ -396,7 +408,7 @@ def test_notices_render_in_every_format_and_sit_with_the_disclosure():
 
     term = report.render_terminal(rep)
     # The id leads the line: it is what a user types into `notices.silence`.
-    assert f"⚠ {_NOTICE.id}: {body}" in term
+    assert f"⚠ {_NOTICE.id} {body}" in _flat(term)
     # Placed with the provenance footer, not with the gate: both describe how the
     # run was configured rather than what the change did.
     assert term.index(body) > term.index("GATE:")
@@ -417,7 +429,8 @@ def test_absent_notices_add_nothing():
     # text: a reworded footnote fails here loudly instead of quietly leaving an
     # assertion that matches nothing.
     warned = [line for line in report.render_terminal(rep).splitlines() if "⚠" in line]
-    assert warned == [f"  ⚠ {_FULL_REFRESH.footnote}"]
+    assert len(warned) == 1
+    assert _FULL_REFRESH.footnote in _flat(report.render_terminal(rep))
     assert json.loads(report.render_json(rep))["notices"] == []
 
 
@@ -447,6 +460,19 @@ def test_a_priced_footer_discloses_the_free_tier_it_does_not_deduct():
     for out in (report.render_terminal(_report()), report.render_markdown(_report())):
         assert "free tier" in out
         assert "never deducted" in out
+
+
+def test_a_declared_allowance_still_says_it_was_not_subtracted():
+    """`pricing.free_tib_per_month` changes what the footer says and nothing it
+    subtracts, so the sentence has to keep saying so in the same breath as the
+    figure. A reader who has configured an allowance is exactly the reader who
+    might otherwise assume it was applied."""
+    rep = _report()
+    rep.disclosure.free_tib_per_month = 1.0
+    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+        flat = _flat(out)
+        assert "You declared 1 TiB/month free" in flat
+        assert "never subtracted from any figure the gate reads" in flat
 
 
 def test_the_footer_stays_on_the_meter_the_report_is_about():
@@ -482,11 +508,12 @@ def test_both_renderers_carry_the_same_footer_notes():
     read. Compared as a whole list so an added note is covered without anyone
     remembering to extend this test."""
     for rep in (_report(), _unpriced_report()):
-        terminal = [
-            line.strip() for line in report.render_terminal(rep).split("\n") if line.strip()
-        ]
+        # The terminal footer is wrapped to the width, so it is compared as text
+        # rather than line by line — the notes have to be the same sentences in
+        # the same order, not the same line breaks.
+        terminal = _flat(report.render_terminal(rep))
         markdown = _md_footer(report.render_markdown(rep))
-        assert terminal[-len(markdown) :] == markdown
+        assert terminal.endswith(_flat(" ".join(markdown)))
 
 
 def _incrementals(n: int) -> Report:
@@ -532,7 +559,7 @@ def test_the_incremental_warning_is_said_once_however_many_rows_carry_it():
     not the per-row repeats came back beneath it.
     """
     for render in (report.render_terminal, report.render_markdown):
-        out = render(_incrementals(4))
+        out = _flat(render(_incrementals(4)))
         assert out.count(_FULL_REFRESH.footnote) == 1
         assert _FULL_REFRESH.warning not in out
 
@@ -543,8 +570,10 @@ def test_every_incremental_row_keeps_its_own_tag():
     collapsing the prose while also dropping the tag would leave the footnote
     referring to nothing."""
     rep = _incrementals(4)
-    terminal = report.render_terminal(rep)
-    assert terminal.count("(full-refresh)") == 4
+    # One per table row: the tag has its own column now, so it is counted on the
+    # rows rather than by a parenthetical that no longer exists.
+    tagged = [line for line in report.render_terminal(rep).splitlines() if "full-refresh" in line]
+    assert len([line for line in tagged if line.strip().startswith("fct_")]) == 4
     assert report.render_markdown(rep).count("_full-refresh_") == 4
 
 
@@ -554,7 +583,7 @@ def test_a_models_own_warnings_still_render_on_its_row():
     rep = _incrementals(2)
     rep.deltas[0].warnings.append("dynamic filter — dry-run may be worst-case (overestimate)")
     assert "  fct_0" in report.render_terminal(rep)
-    assert "      ⚠ dynamic filter" in report.render_terminal(rep)
+    assert "⚠ fct_0 dynamic filter" in _flat(report.render_terminal(rep))
     assert "> ⚠ **fct_0** — dynamic filter" in report.render_markdown(rep)
 
 
@@ -575,8 +604,8 @@ def test_the_footnote_follows_the_warning_and_not_the_tag():
     rep.deltas[0].warnings = []
     assert rep.deltas[0].is_incremental
     terminal = report.render_terminal(rep)
-    assert "(full-refresh)" in terminal
-    assert _FULL_REFRESH.footnote not in terminal
+    assert _FULL_REFRESH.tag in terminal
+    assert _FULL_REFRESH.footnote not in _flat(terminal)
 
 
 def _basis_row(name: str, basis: EstimateBasis) -> CostDelta:
@@ -652,7 +681,7 @@ def test_a_report_mixing_bases_explains_both_tags():
     page with nothing saying what it means — and the reader with no way to know
     which figure they are looking at."""
     rep = _basis_report(EstimateBasis.FULL_REFRESH, EstimateBasis.INCREMENTAL_FORM)
-    for out in (report.render_terminal(rep), report.render_markdown(rep)):
+    for out in (_flat(report.render_terminal(rep)), report.render_markdown(rep)):
         assert out.count(_FULL_REFRESH.footnote) == 1
         assert out.count(_INCREMENTAL_FORM.footnote) == 1
         assert _FULL_REFRESH.tag in out and _INCREMENTAL_FORM.tag in out
@@ -671,3 +700,164 @@ def test_json_states_which_basis_was_measured():
     unknown = _basis_report(EstimateBasis.FULL_REFRESH)
     unknown.deltas[0].basis = None
     assert json.loads(report.render_json(unknown))["models"][0]["basis"] is None
+
+
+# --- the declared free-tier allowance ----------------------------------------
+#
+# Reported, never deducted. Every test below exists to keep those two halves
+# together: the figure has to appear, and nothing the gate reads may move.
+
+
+def _allowance_report(deltas, free=1.0, rate=6.25, mode="diff"):
+    rep = _net_report(deltas, rate=rate, mode=mode)
+    rep.disclosure.free_tib_per_month = free
+    return rep
+
+
+def test_declaring_an_allowance_changes_no_figure_the_gate_reads():
+    """The whole design in one assertion. Same deltas, same thresholds, one with
+    an allowance declared and one without: the verdict, the exit code and the
+    breach list have to be identical, because the allowance is context and a
+    threshold is not."""
+    from dbt_costgate import policy
+    from dbt_costgate.config import Config, Thresholds
+
+    deltas = [_delta("fct_orders", 2 * _TIB, 9 * _TIB), _delta("dim_small", _TIB, _TIB)]
+    thresholds = Thresholds(max_usd_increase_per_run=5.0, max_usd_increase_per_month=100.0)
+    plain = policy.evaluate(deltas, Config(thresholds=thresholds))
+    declared = policy.evaluate(deltas, Config(thresholds=thresholds, free_tib_per_month=1.0))
+    assert (plain.status, plain.exit_code, plain.breaches) == (
+        declared.status,
+        declared.exit_code,
+        declared.breaches,
+    )
+    assert plain.breaches, "a test that compares two passes would prove nothing"
+
+
+def _body(out: str) -> list[str]:
+    """Everything between the pricing header and the pricing footer: the table,
+    the net line, the verdict and the notes. All the figures, in other words —
+    which is what an allowance must leave alone."""
+    lines = out.splitlines()
+    end = next(i for i, line in enumerate(lines) if line.strip().startswith("Pricing:"))
+    return lines[1:end]
+
+
+def test_the_report_is_identical_but_for_the_lines_the_allowance_adds():
+    """Stronger than comparing verdicts: every rendered figure has to survive it.
+    The allowance may add its own line, change the header's tail and reword the
+    footer, and touch nothing else."""
+    deltas = [_delta("fct_orders", 2 * _TIB, 9 * _TIB)]
+    plain = _body(report.render_terminal(_net_report(deltas), width=100))
+    declared = _body(report.render_terminal(_allowance_report(deltas), width=100))
+    added = [line for line in declared if "Monthly scan for these models" in line]
+    assert len(added) == 1, "the allowance line is the only thing it may add here"
+    assert [line for line in declared if line not in added] == plain
+
+
+def test_the_allowance_appears_where_a_builder_is_already_looking():
+    """Line one, in the pricing line, where a reader goes to find out what they
+    are being charged — not only in the footer under everything else."""
+    rep = _allowance_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB)])
+    first = report.render_terminal(rep, width=100).splitlines()[0]
+    assert "first 1 TiB/month free" in first
+
+
+def test_the_allowance_line_scopes_itself_to_the_models_in_the_run():
+    """A pull request touches two models of two hundred, so this total is not the
+    project's monthly scan. The allowance is account-wide and this figure is not,
+    and the line has to say which it is."""
+    rep = _allowance_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB)])
+    for out in (report.render_terminal(rep, width=100), report.render_markdown(rep)):
+        assert "Monthly scan for these models" in _flat(out)
+
+
+def test_the_allowance_line_says_which_side_of_the_line_the_change_falls():
+    small = [_delta("dim_tiny", None, 1024, runs=1)]
+    big = [_delta("fct_orders", 2 * _TIB, 9 * _TIB)]
+    assert "inside the 1 TiB/month you declared free" in _flat(
+        report.render_terminal(_allowance_report(small), width=100)
+    )
+    assert "past the 1 TiB/month you declared free" in _flat(
+        report.render_terminal(_allowance_report(big), width=100)
+    )
+
+
+def test_an_undeclared_allowance_changes_nothing_anywhere():
+    """The default. Someone who has not opted in sees exactly what they saw
+    before — no header segment, no extra line, the original footer."""
+    out = report.render_terminal(_net_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB)]), width=100)
+    assert "TiB/month free" not in out
+    assert "Monthly scan for these models" not in out
+    assert "never deducted" in _flat(out)
+
+
+def test_an_allowance_is_silent_under_slot_pricing():
+    """The free tier is an on-demand allowance and does not exist under
+    capacity/Editions pricing, so declaring one there describes an arrangement
+    the run is not on."""
+    rep = _allowance_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB, rate=0.0)], rate=0.0)
+    out = report.render_terminal(rep, width=100)
+    assert "TiB/month free" not in out
+    assert "Monthly scan for these models" not in out
+
+
+def test_an_allowance_line_is_omitted_when_the_month_is_unknown():
+    """No run frequency, no monthly figure to compare against — the notice
+    explains that rather than the report inventing a number."""
+    rep = _allowance_report([_delta("fct_orders", 2 * _TIB, 9 * _TIB, runs=None)])
+    out = report.render_terminal(rep, width=100)
+    assert "Monthly scan for these models" not in out
+    assert "first 1 TiB/month free" in out, "the declaration is still worth stating"
+
+
+def test_json_carries_the_allowance_and_the_monthly_total():
+    deltas = [_delta("fct_orders", 2 * _TIB, 9 * _TIB)]
+    payload = json.loads(report.render_json(_allowance_report(deltas)))
+    assert payload["pricing"]["free_tib_per_month"] == 1.0
+    assert payload["net"]["monthly_scan_bytes"] == 9 * _TIB * 30
+    plain = json.loads(report.render_json(_net_report(deltas)))
+    assert plain["pricing"]["free_tib_per_month"] is None
+
+
+def test_the_monthly_total_survives_absolute_mode():
+    """Unlike its three neighbours in `net`, it is an absolute figure, not a
+    delta — there being no baseline does not stop it meaning something."""
+    deltas = [_delta("fct_orders", None, 9 * _TIB)]
+    payload = json.loads(report.render_json(_net_report(deltas, mode="absolute")))
+    assert payload["net"]["bytes"] is None
+    assert payload["net"]["monthly_scan_bytes"] == 9 * _TIB * 30
+
+
+def test_the_monthly_total_refuses_to_be_partial():
+    """A total that quietly omits some of its rows reads as complete and
+    understates, which is the one direction this tool does not go. `None` on
+    empty for the same reason `net_bytes` is: zero would claim this change scans
+    nothing in a month, which is a different statement from having nothing to
+    say."""
+    from dbt_costgate.models import monthly_scan_bytes
+
+    assert monthly_scan_bytes([]) is None
+    assert monthly_scan_bytes([_delta("a", _TIB, 2 * _TIB, runs=30)]) == 2 * _TIB * 30
+    assert (
+        monthly_scan_bytes([_delta("a", _TIB, 2 * _TIB, runs=30), _delta("b", _TIB, _TIB, runs=7)])
+        == 2 * _TIB * 30 + _TIB * 7
+    )
+    # One model without a frequency takes the whole total with it.
+    assert (
+        monthly_scan_bytes(
+            [_delta("a", _TIB, 2 * _TIB, runs=30), _delta("b", _TIB, _TIB, runs=None)]
+        )
+        is None
+    )
+
+
+def test_the_monthly_total_ignores_rows_the_net_ignores():
+    """It reads the same rows every other run-level total does, so a model whose
+    two figures cannot be compared cannot creep into this one either."""
+    from dbt_costgate.models import monthly_scan_bytes
+
+    mismatched = _delta("bad", _TIB, 9 * _TIB, runs=30)
+    mismatched.comparable = False
+    assert monthly_scan_bytes([mismatched]) is None
+    assert monthly_scan_bytes([mismatched, _delta("ok", _TIB, 2 * _TIB, runs=30)]) == 2 * _TIB * 30

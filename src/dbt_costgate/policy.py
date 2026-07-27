@@ -8,7 +8,15 @@ or user-excluded models are reported but never cause a failure.
 from __future__ import annotations
 
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import TIB, CostDelta, Status, Verdict, format_money
+from dbt_costgate.models import (
+    SKIP_REASON_MESSAGES,
+    TIB,
+    CostDelta,
+    Status,
+    Verdict,
+    format_money,
+    format_pct,
+)
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -17,13 +25,45 @@ EXIT_OPERATIONAL = 2
 
 def evaluate(deltas: list[CostDelta], config: Config, currency: str = "USD") -> Verdict:
     """Evaluate thresholds. `currency` only labels the amounts in breach messages;
-    it never affects whether a threshold fires."""
+    it never affects whether a threshold fires.
+
+    A model the gate could not check counts as a breach. That is the fail-closed
+    choice, and it is deliberate: there was previously no setting at all that
+    made "I could not measure this model" fail a run, so a baseline compiled the
+    wrong way, or a whole project of 404s, reported `PASS` and exit 0. Because it
+    is an ordinary breach, the escape hatches that already exist still work —
+    `fail_on: never` to stop blocking, `exclude:` to accept one model by name.
+    """
     thr = config.thresholds
     breaches: list[str] = []
+    unchecked = [d for d in deltas if d.unchecked]
+
+    if deltas and len(unchecked) == len(deltas):
+        # Nothing at all was measured. This is a breach whether or not any
+        # threshold is configured, because `PASS` here does not mean "I checked
+        # and found nothing wrong" — it means the gate never ran, and said so in
+        # the one word CI reads as approval. The likeliest causes are mundane: an
+        # unbuilt dev schema, the wrong --project, a deferred build that never ran.
+        reasons = sorted({SKIP_REASON_MESSAGES[d.skip_reason] for d in unchecked})
+        count = len(deltas)
+        # "could be gated" rather than "produced an estimate": a basis mismatch
+        # produces two perfectly good estimates and fails on the comparison
+        # between them, so the narrower wording would be untrue of it.
+        breaches.append(
+            f"nothing was checked: none of the {count} selected model"
+            f"{'' if count == 1 else 's'} could be gated — {'; '.join(reasons)}"
+        )
+    elif thr.any_set:
+        # A model the gate could not check, on a run that asked for enforcement.
+        # With no thresholds configured the run is informational — a zero-setup
+        # local look — and failing it would answer a question nobody asked.
+        breaches.extend(
+            f"{d.name}: not checked — {SKIP_REASON_MESSAGES[d.skip_reason]}" for d in unchecked
+        )
+
     for d in deltas:
-        if not d.gateable:
-            continue
-        breaches.extend(_breaches_for(d, thr, currency))
+        if d.gateable:
+            breaches.extend(_breaches_for(d, thr, currency))
 
     if not breaches:
         return Verdict(status=Status.PASS, exit_code=EXIT_OK)
@@ -83,9 +123,20 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
                 f"{d.name}: {format_money(run_delta, cur, signed=True)}/run exceeds "
                 f"{format_money(thr.max_usd_increase_per_run, cur)}"
             )
-    if thr.max_pct_increase is not None and d.pct_delta is not None:
-        if d.pct_delta > thr.max_pct_increase:
-            out.append(f"{d.name}: {d.pct_delta:+,.0f}% exceeds {thr.max_pct_increase:,.0f}%")
+    if thr.max_pct_increase is not None:
+        if d.grew_from_zero:
+            # No ratio exists to a zero baseline, so `pct_delta` is None and the
+            # comparison below can never fire — which left the percentage gate
+            # switched off for the one model it should catch hardest.
+            out.append(
+                f"{d.name}: grew from a baseline that scanned nothing, which is past any "
+                f"percentage limit ({format_pct(thr.max_pct_increase, signed=False)})"
+            )
+        elif d.pct_delta is not None and d.pct_delta > thr.max_pct_increase:
+            out.append(
+                f"{d.name}: {format_pct(d.pct_delta)} exceeds "
+                f"{format_pct(thr.max_pct_increase, signed=False)}"
+            )
     month_delta = d.usd_per_month_delta
     if thr.max_usd_increase_per_month is not None and month_delta is not None:
         if month_delta > thr.max_usd_increase_per_month:

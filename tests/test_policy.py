@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dbt_costgate import policy
 from dbt_costgate.config import Config, Thresholds
-from dbt_costgate.models import TIB, CostDelta, Status
+from dbt_costgate.models import TIB, CostDelta, SkipReason, Status
 
 
 def _delta(
@@ -245,3 +245,23 @@ def test_notice_never_changes_the_verdict():
     assert v.status == Status.FAIL
     assert v.exit_code == policy.EXIT_GATE_FAILED
     assert v.breaches == ["m: +300% exceeds 25%"]
+
+
+def test_the_run_level_breach_agrees_with_its_own_count():
+    """Every skip reason is used in two frames — after one model's name, and
+    after a count of them. A reason written as "its dry-run…" reads correctly in
+    the first and disagrees with the plural in the second, which is how the gate
+    came to report "none of the 2 selected models could be gated — its dry-run
+    did not return a size"."""
+    cfg = Config(thresholds=Thresholds(max_pct_increase=25.0))
+    for reason in SkipReason:
+        if not reason.is_unchecked:
+            continue
+        deltas = [
+            _delta(name=n, gateable=False, bytes_current=None, usd_current=None) for n in ("a", "b")
+        ]
+        for d in deltas:
+            object.__setattr__(d, "skip_reason", reason)
+        (breach,) = [b for b in policy.evaluate(deltas, cfg).breaches if "nothing" in b]
+        assert "2 selected models" in breach
+        assert " its " not in f" {breach} ", breach
