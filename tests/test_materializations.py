@@ -141,7 +141,16 @@ def test_a_materialized_view_says_its_figure_is_not_the_recurring_cost(tmp_path:
 def test_selecting_an_ephemeral_model_says_why_it_cannot_be_priced(tmp_path: Path, capsys):
     """BUG-F02. Naming a model that exists and getting silence back — or worse,
     "no such model" — reads as a bug in the tool. It exists; it just has no
-    relation of its own to scan."""
+    relation of its own to scan.
+
+    This used to also assert exit 2 and produce no report. Running against a
+    realistic project showed what that costs: `keep` has a real answer, and
+    `--select` from `dbt ls --resource-type model` includes ephemerals, so an
+    ordinary CI line threw away every figure it had. The explanation this test
+    exists for is unchanged and is what still matters; `keep` is now reported
+    beside it. Naming *only* unpriced nodes is still exit 2 — see
+    tests/test_visibility.py.
+    """
     target = write_target(
         tmp_path,
         make_manifest(
@@ -150,8 +159,9 @@ def test_selecting_an_ephemeral_model_says_why_it_cannot_be_priced(tmp_path: Pat
         ),
     )
     code = _check(target, "--select", "eph,keep", runner=FakeDryRunner({"K": TIB}))
-    err = capsys.readouterr().err
-    assert code == 2
+    out, err = capsys.readouterr()
+    assert code == 0
+    assert "keep" in out
     assert "eph" in err
     assert "ephemeral models have no relation of their own" in err
     assert "no such model" not in err

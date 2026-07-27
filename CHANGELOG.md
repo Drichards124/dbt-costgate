@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [1.0.1] - 2026-07-27
+
+### Fixed
+
+- **`--select` no longer throws away the whole report because one name cannot be
+  priced.** Naming a seed, a snapshot or an ephemeral model alongside real models
+  used to end the run at exit 2 with nothing printed — even when sixteen other
+  models had answers. That is reachable from an ordinary CI line, because
+  `dbt ls --select state:modified --resource-type model` includes ephemerals.
+
+  Those names are now reported on stderr and the run carries on, which is what
+  the change-detection path has always done:
+
+  ```
+  dbt-costgate: int_names_00 was selected but is not priced — ephemeral models
+    have no relation of their own; their SQL is inlined into the models that
+    select from them, and the cost shows up there.
+  ```
+
+  **Two things deliberately did not change.** A `--select` naming *only* unpriced
+  nodes is still exit 2 — nothing was gated, and that has to stay loud. A name
+  nobody recognises is still exit 2 with a spelling suggestion, so a stale list
+  cannot quietly check nothing.
+
+- **A BigQuery outage no longer hangs your CI job for up to forty minutes per
+  model.** `deadline_seconds` (default 60) was bounding nothing. `Client.query`
+  takes two independent retries and dbt-costgate set only one, leaving
+  `job_retry` at its 2400-second default to re-drive the whole thing underneath.
+  Measured against real BigQuery, a 5-second deadline ran for **179 seconds over
+  42 attempts**. It now gives up inside the deadline — the same case takes 2.1
+  seconds.
+
+- **A dry-run that BigQuery could not serve now says so.** When the retries run
+  out, the client raises a `RetryError` wrapping the real failure, which fell
+  through every check and was reported as `the dry-run failed`. You now get the
+  message that was always meant for this:
+
+  ```
+  not estimated — BigQuery was unavailable and the retries ran out
+  ```
+
+  This affects the reported reason only. That kind was already treated as an
+  operational failure, so no exit code or verdict changes.
+
 ## [1.0.0] - 2026-07-27
 
 **1.0 because the last thing standing in its way is done.** The v0.11.0 notes

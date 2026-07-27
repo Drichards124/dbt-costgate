@@ -215,6 +215,78 @@ def test_a_change_to_an_unpriced_node_says_so_rather_than_nothing(
     assert expected in err
 
 
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ({"resource_type": "seed"}, "seeds are not priced"),
+        ({"resource_type": "snapshot"}, "snapshots are not priced"),
+        ({"materialized": "ephemeral"}, "ephemeral models have no relation of their own"),
+    ],
+)
+def test_select_naming_an_unpriced_node_still_reports_the_models_beside_it(
+    tmp_path: Path, capsys, spec, expected
+):
+    """One un-gateable name used to discard the entire report.
+
+    Found against a realistic project: `--select` built from
+    `dbt ls --select state:modified --resource-type model` includes ephemerals,
+    so a 16-model change reported nothing at all and exited 2. The diff path has
+    always named these and carried on; the two now agree.
+    """
+    target = write_target(
+        tmp_path,
+        make_manifest(
+            make_node("kept", compiled_code="KEPT"),
+            make_node("other", **spec),
+        ),
+    )
+    code = main(
+        ["check", "--current", str(target), "--select", "kept,other"],
+        runner=FakeDryRunner({"KEPT": TIB}),
+    )
+    out, err = capsys.readouterr()
+    assert code == 0
+    assert "kept" in out  # the model that could be priced still gets its row
+    assert "other was selected but is not priced" in err
+    assert expected in err
+
+
+def test_select_naming_only_unpriced_nodes_is_still_a_usage_error(tmp_path: Path, capsys):
+    # Nothing was gateable, so the gate never ran. That has to stay loud —
+    # reporting an empty table and exit 0 is the failure mode this whole
+    # exit-code contract exists to prevent.
+    target = write_target(
+        tmp_path,
+        make_manifest(
+            make_node("kept", compiled_code="KEPT"),
+            make_node("snap", resource_type="snapshot"),
+        ),
+    )
+    code = main(["check", "--current", str(target), "--select", "snap"], runner=FakeDryRunner({}))
+    assert code == 2
+    assert "matched nothing" in capsys.readouterr().err
+
+
+def test_a_typo_beside_an_unpriced_node_is_still_a_usage_error(tmp_path: Path, capsys):
+    # The relaxation is for names that resolve to something real. A name nobody
+    # recognises is a stale list, and staying quiet about it is how a --select
+    # built by a script checks nothing and goes green.
+    target = write_target(
+        tmp_path,
+        make_manifest(
+            make_node("kept", compiled_code="KEPT"),
+            make_node("snap", resource_type="snapshot"),
+        ),
+    )
+    code = main(
+        ["check", "--current", str(target), "--select", "kept,snap,keptt"],
+        runner=FakeDryRunner({"KEPT": TIB}),
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "keptt" in err and "did you mean kept?" in err
+
+
 def test_an_unpriced_node_is_named_even_when_models_were_estimated_too(tmp_path: Path, capsys):
     """A change that touches three models and a snapshot still has an unpriced
     snapshot in it. Said on stderr, so it never reaches a pull-request comment

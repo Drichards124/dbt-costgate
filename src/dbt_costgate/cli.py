@@ -279,11 +279,16 @@ class _Selection:
     was not what changed. `paths` is the git diff the local path used, kept so
     the caller can say which out-of-scope nodes a change touched — and `None`
     when selection did not come from a diff at all.
+
+    `unpriced` is the `--select` counterpart of that last part: names the user
+    asked for by hand that exist but are not something dbt-costgate prices. The
+    diff path learns them from `paths`, which `--select` does not have.
     """
 
     uids: list[str]
     notes: dict[str, str] = field(default_factory=dict)
     paths: list[str] | None = None
+    unpriced: dict[str, str] = field(default_factory=dict)
 
 
 def _select(
@@ -309,9 +314,17 @@ def _select(
         # request went green.
         matched = set(selected) | {current_nodes[uid].name for uid in selected}
         missing = sorted(wanted - matched)
-        if missing:
+        # Two kinds of miss, and only one of them is the user's mistake. A name
+        # nobody recognises is a typo or a stale list, and must stay loud. A name
+        # that names a real seed, snapshot or ephemeral is the same script doing
+        # its job — `dbt ls --resource-type model` emits ephemerals — and
+        # discarding the whole report over it threw away every model that did
+        # have an answer. The diff path has always reported those and carried on;
+        # this makes --select agree with it.
+        unknown = [name for name in missing if name not in out_of_scope]
+        if unknown or not selected:
             raise _UsageError(_unmatched_selection(missing, current_nodes, out_of_scope))
-        return _Selection(selected)
+        return _Selection(selected, unpriced={name: out_of_scope[name] for name in missing})
     if baseline_nodes is not None:
         return _Selection(artifacts.select_changed(baseline_nodes, current_nodes, renames))
     paths = gitdiff.changed_paths(project_dir, args.base)
@@ -482,6 +495,11 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     )
     for name, reason in sorted(touched.items()):
         print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
+    # The --select equivalent. Same stream and same reason: it belongs beside the
+    # figures, not among them, so it cannot reach a pull-request comment looking
+    # like one.
+    for name, reason in sorted(selection.unpriced.items()):
+        print(f"dbt-costgate: {name} was selected but is not priced — {reason}.", file=sys.stderr)
 
     diff_mode = baseline_nodes is not None
     if runner is None:
