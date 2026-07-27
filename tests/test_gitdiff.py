@@ -29,7 +29,7 @@ def test_changed_paths_map_to_the_changed_model(tmp_path: Path):
         )
     )
     paths = gitdiff.changed_paths(repo, "main")
-    changed = {nodes[uid].name for uid in artifacts.select_by_paths(nodes, paths)}
+    changed = {nodes[uid].name for uid in artifacts.select_by_paths(nodes, paths)[0]}
     assert changed == {"a"}
 
 
@@ -68,7 +68,7 @@ def test_changed_paths_are_project_relative_in_a_subdir_project(tmp_path: Path):
     assert paths == ["models/a.sql"]  # not "analytics/models/a.sql"; sibling file excluded
 
     nodes = artifacts.model_nodes(make_manifest(make_node("a", original_file_path="models/a.sql")))
-    assert artifacts.select_by_paths(nodes, paths) == ["model.pkg.a"]
+    assert artifacts.select_by_paths(nodes, paths)[0] == ["model.pkg.a"]
 
 
 def test_changed_paths_unaffected_when_the_project_is_the_repo_root(tmp_path: Path):

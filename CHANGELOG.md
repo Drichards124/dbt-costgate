@@ -6,6 +6,187 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (currently pre-1.0: minor versions may contain breaking changes, noted here).
 
+## [Unreleased]
+
+A manual QA pass drove the packaged CLI end to end against a real dbt project
+and found 21 defects. This release fixes all of them, and rebuilds the terminal
+report around a readable table.
+
+**Read the breaking changes first if you run dbt-costgate in CI** — a gate that
+could not check a model now fails instead of passing, and that is deliberate.
+
+### Breaking
+
+- **A gate that could not check a model now fails the run (exit 1).** Previously
+  it reported `GATE: PASS` and exit 0. There were four ways into this and all of
+  them are ordinary mistakes: a baseline compiled a different way from the
+  branch, a model whose dry-run returned no size, a baseline with no compiled
+  SQL, and a run where nothing at all could be estimated. The report warned in
+  some of these cases, but CI reads the exit code.
+
+  In practice this fires when a threshold is configured and a model could not be
+  measured. If that is expected for a particular model — an external table your
+  service account cannot see, say — accept it by name:
+
+  ```yaml
+  exclude:
+    - external_events
+  ```
+
+  To stop blocking entirely while you sort it out, `fail_on: never` reports the
+  breaches and exits 0. There is no new setting to learn.
+
+  One case fails regardless of thresholds: a run where **every** selected model
+  failed to estimate. `PASS` there does not mean "I checked and found nothing
+  wrong" — it means the gate never ran. The usual causes are an unbuilt dev
+  schema, the wrong `--project`, or a deferred build that never happened.
+
+- **A config error now exits 2 instead of 1.** ADR-0008 reserves 1 for a
+  threshold breach; a malformed `.dbt-costgate.yml` was exiting 1 with a Python
+  stack trace, so CI reported a YAML typo as a cost regression. A failed
+  `--output` write moved for the same reason.
+
+- **`.dbt-costgate.yml` is now validated, and rejects what it used to ignore.**
+  A file that was quietly half-applied will now fail with a message naming the
+  key. Three things change:
+  - `exclude: my_model` written as a bare string used to become a list of single
+    characters and match nothing. A scalar is now read as a one-item list, so
+    this works as written.
+  - `fail_on: no` is YAML for the boolean false. It matched neither `never` nor
+    `warn` and fell through to the strictest setting — the opposite of what
+    someone writing "no" means. `fail_on` and `report.format` are now checked
+    against their allowed values.
+  - An unknown key is refused, with the nearest documented key as a hint. A typo
+    like `thresholds.max_usd_totl` used to leave you with no threshold at all.
+
+- **A manifest compiled for another warehouse is refused (exit 2).** Nothing
+  checked `metadata.adapter_type`, so pointing dbt-costgate at a Snowflake,
+  Postgres or duckdb project produced confident BigQuery dollar figures for SQL
+  BigQuery was never going to run. Manifests without the field still run.
+
+### Changed
+
+- **The terminal report is a table.** It used to write each model as a sentence,
+  so figures started at a different column on every row, nothing lined up, and a
+  priced diff row ran to 108 characters and wrapped:
+
+  ```
+    fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +316.46/month (24 runs)
+  ```
+
+  Now:
+
+  ```
+    MODEL                             BASELINE     CURRENT    Δ %     Δ / RUN    Δ / MONTH  RUNS
+    ────────────────  ────────────  ──────────  ──────────  ─────  ──────────  ───────────  ────
+    fct_orders_daily  full-refresh  819.20 GiB    2.91 TiB  +264%  USD +13.19  USD +395.63    30
+  ```
+
+  Per-model warnings moved below the table, into a `NOTES` block keyed by model.
+  Nothing was removed — `(24 runs)` became the `RUNS` column.
+
+  It adapts to the terminal width, giving up columns in a fixed order and saying
+  which it hid; the model name and the per-run cost are never among them. Below
+  60 columns it prints one block per model instead. Output redirected to a file
+  or a pipe always renders at a fixed width, so a captured report does not depend
+  on the window that produced it.
+
+- **Percentages are printed at the precision they need.** A 0.4% increase over a
+  `max_pct_increase: 0.3` limit used to produce the breach line `+0% exceeds 0%`,
+  which reads like a bug rather than a correct failure.
+
+- **Unpriced (slot-priced) reports are ordered by size.** With every rate at 0
+  the sort had nothing to work with and rows came out in arrival order.
+
+- **The `incremental` and `full-refresh` footnotes say which figure is the big
+  one.** Every fact in the old wording was correct — "the figure is one run
+  against the table as already built, so it does not gate rebuild cost" — and it
+  took a second read to work out that the number on screen is the cheap case and
+  the expensive one is not in the report at all. Each now says what the figure
+  is, what it is not, and which of the two is larger, in that order:
+
+  > incremental — rows tagged incremental show one run against a table that
+  > already exists. A full rebuild scans far more, and nothing here measures it,
+  > so no threshold on this report can catch a rebuild getting expensive.
+
+### Added
+
+- **`--color auto|always|never`** (default `auto`): colour when stdout is a
+  terminal, off when piped, and off whenever `NO_COLOR` is set.
+
+- **Deleting a model is reported as the saving it is.** Removing a model is the
+  most direct cost reduction a change can make, and it produced no row and no
+  credit — a branch deleting a 411 GiB/run model reported `Net change: none`.
+  Deleted models are dry-run from the baseline, tagged `deleted`, and never
+  gated: a removal cannot raise cost.
+
+- **A change to an ephemeral model now selects the models that inline it.** Its
+  SQL ends up inside them, so widening a filter there is a real cost change —
+  but on the local path, which is what the pre-commit hook runs, it selected
+  nothing at all.
+
+- **A changed seed, snapshot, Python model or ephemeral model is named.** These
+  are out of scope for pricing, which is fine; being indistinguishable from
+  "nothing changed" is not, and a snapshot really does run a `MERGE`.
+
+- **A `--select` name that matches nothing is an error (exit 2)**, listing the
+  names with a suggestion for near misses, and saying when the model exists but
+  is a kind dbt-costgate does not price. It used to select nothing in silence, so
+  a CI job building its list from `dbt ls` checked nothing the day that list went
+  stale.
+
+- **A materialized view says its figure is not the recurring cost.** It is priced
+  like a plain view, but BigQuery bills each automatic refresh separately.
+
+- **New notice `new-models-not-percentage-gated`.** `max_pct_increase` needs a
+  before and an after, so it cannot cover a model that has no baseline. If it is
+  your only threshold, the report now names the new models that went through
+  ungated and points at `max_usd_total` / `max_tib_total`, which need no
+  baseline. Silence it like any other notice.
+
+- **JSON gains `skip_reason` and `is_deleted` per model.** `gateable` alone could
+  not tell a consumer whether you excluded a model or the gate could not measure
+  it, and those mean opposite things on a dashboard.
+
+### Fixed
+
+- **A model that scanned 0 B on the baseline now breaches `max_pct_increase`.**
+  There is no ratio to a zero baseline, so the threshold silently did not apply
+  to exactly the model it should catch hardest.
+
+- **The net line no longer totals a comparison the report just called invalid.**
+  Having warned that a model's two figures cannot be subtracted, it went on to
+  headline the subtraction. Naming that model in `exclude:` does not bring the
+  total back either — an exclusion says "do not fail the build over this", not
+  "the two figures are comparable after all".
+
+- **A permanent SQL error is no longer reported as a transient one.** The status
+  code was matched anywhere in the message, so `400 Syntax error … at [500:3]`
+  came back as "BigQuery was unavailable and the retries ran out" — and would
+  have been retried until the deadline. A table called `orders_500` did the same.
+
+- **A 404 on a different dataset's same-named table is no longer read as the
+  model's own.** With a staging/marts layout that misread a broken run as an
+  expected one, and the advice printed was about incremental models.
+
+- **Standard SQL is requested explicitly.** It held only because the client
+  library defaults it; the REST API's own default is the opposite.
+
+- **A missing `--baseline` file is explained in terms of `--baseline`**, not
+  `--current` — it used to tell you to fix a flag you had got right.
+
+- **Per-model deltas are `null` in absolute mode**, matching the run-level `net`
+  block. There is no baseline there to have a delta from.
+
+### Docs
+
+- `fail_on`'s description now says what it does: `warn` and `fail` both exit 1 on
+  a breach and differ only in the printed label. Warnings are not an input to the
+  gate.
+- `usage.md` no longer says a fresh `target/` produces the full-refresh form of
+  an incremental. dbt decides that from whether the relation exists in the
+  warehouse; `dbt compile --full-refresh` is what actually produces it.
+
 ## [0.10.0] - 2026-07-26
 
 ### Security

@@ -1,0 +1,1722 @@
+
+### Setting up: a throwaway venv with dbt-duckdb + a wheel built from this repo — the way a real analytics engineer has them side by side.
+
+$ /Users/dashanrichards/Desktop/dbt-costgate/.venv/bin/dbt-costgate --version
+dbt-costgate 0.10.0
+[exit 0]
+
+### SECTION 1 — First contact. A user who has just pip-installed it. No config, no credentials, nothing set up.
+
+$ dbt-costgate --version
+dbt-costgate 0.10.0
+[exit 0]
+
+$ dbt-costgate
+usage: dbt-costgate [-h] [--version] {check,config,init} ...
+
+BigQuery cost gate for dbt pull requests.
+
+positional arguments:
+  {check,config,init}
+    check              Estimate the BigQuery cost impact of changed dbt
+                       models.
+    config             List every .dbt-costgate.yml key with a plain-English
+                       explanation.
+    init               Write a starter .dbt-costgate.yml, with every setting
+                       commented out.
+
+options:
+  -h, --help           show this help message and exit
+  --version            show program's version number and exit
+[exit 0]
+
+$ dbt-costgate badcommand
+usage: dbt-costgate [-h] [--version] {check,config,init} ...
+dbt-costgate: error: argument command: invalid choice: 'badcommand' (choose from 'check', 'config', 'init')
+[exit 2]
+
+$ dbt-costgate check --bogus-flag
+usage: dbt-costgate [-h] [--version] {check,config,init} ...
+dbt-costgate: error: unrecognized arguments: --bogus-flag
+[exit 2]
+
+$ dbt-costgate init
+Wrote /private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/demoproj/.dbt-costgate.yml
+Every setting is commented out; uncomment what you need. Nothing changes yet.
+[exit 0]
+
+$ dbt-costgate init
+dbt-costgate: /private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/demoproj/.dbt-costgate.yml already exists — not overwriting it.
+[exit 2]
+
+### SECTION 2 — Zero-setup local path. First: what happens before you have compiled anything.
+
+$ dbt-costgate check
+dbt-costgate: No manifest.json at target. Run `dbt compile` first, then point --current at the target/ directory (or pass the manifest path).
+[exit 2]
+
+### Now a parse-only manifest (dbt parse, not compile) — a very common user mistake.
+
+$ dbt parse
+[0m20:43:48  Running with dbt=1.12.0
+[0m20:43:48  Registered adapter: duckdb=1.8.4
+[0m20:43:48  Unable to do partial parsing because saved manifest not found. Starting full parse.
+[0m20:43:49  Performance info: /private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/demoproj/target/perf_info.json
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Compile for real. This is a fresh target — no tables built yet — so the incremental compiles in FULL-REFRESH form.
+
+$ dbt compile
+20:44:14  Running with dbt=1.12.0
+20:44:14  Registered adapter: duckdb=1.8.4
+20:44:15  Found 5 models, 1 snapshot, 1 seed, 468 macros
+20:44:15  
+20:44:15  Concurrency: 4 threads (target='dev')
+20:44:15  
+[exit 0]
+
+### SECTION 2b — On a feature branch: one model widened with a join, one model added. Recompile, then run the gate the way the README says: two commands, no config.
+
+$ git status --short --branch
+## feature/widen-window
+[exit 0]
+
+$ dbt compile
+20:44:35  Running with dbt=1.12.0
+20:44:36  Registered adapter: duckdb=1.8.4
+20:44:36  Found 6 models, 1 snapshot, 1 seed, 468 macros
+20:44:36  
+20:44:36  Concurrency: 4 threads (target='dev')
+20:44:36  
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 84.00 MiB scanned   USD 0.00/run
+  dim_new_metric: 12.00 MiB scanned   USD 0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Baseline captured from main, branch recompiled. Now the headline command with realistic warehouse sizes.
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 2.91 TiB scanned   USD 18.19/run
+  dim_new_metric: 412.50 MiB scanned   USD 0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Selection paths: explicit --select, a name that doesn't exist, and a model that wasn't touched.
+
+$ dbt-costgate check --select dim_customers
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select does_not_exist
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers,stg_orders,int_order_items
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+  stg_orders: 88.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Now --current in its two documented forms, and running from outside the project.
+
+$ dbt-costgate check --select dim_customers --current target/manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers --current target
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers --current demoproj/target
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers --project-dir demoproj --current demoproj/target
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --project-dir /no/such/dir
+dbt-costgate: --project-dir does not exist: /no/such/dir
+[exit 2]
+
+### SECTION 3 — Diff mode. This is the PR gate: main's compiled manifest as the baseline, the branch as current.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Same run, now with thresholds — the gate that blocks a merge.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --max-usd-per-run 5 --max-pct 25
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+    - fct_orders_daily: +264% exceeds 25%
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### --against main: costgate checks main out into a throwaway git worktree and runs dbt compile there itself. This spawns dbt as a child process.
+
+$ dbt-costgate check --against main --max-usd-per-run 5
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+$ dbt-costgate check --against no-such-ref
+dbt-costgate: couldn't resolve ref 'no-such-ref' to compile as the baseline. Use an existing branch/tag/SHA, or --baseline with a pre-compiled manifest.
+[exit 2]
+
+$ dbt-costgate check --against main --baseline ../baseline-main-manifest.json
+dbt-costgate: use only one of --baseline, --against, or --baseline-target.
+[exit 2]
+
+$ dbt-costgate check --baseline ../nope.json
+dbt-costgate: No manifest.json at ../nope.json. Run `dbt compile` first, then point --current at the target/ directory (or pass the manifest path).
+[exit 2]
+
+### SECTION 4 — Materializations. Branch that changes ONLY an ephemeral model. Its SQL is inlined into two downstream models, so the cost change is real.
+
+$ git diff --name-only main
+models/intermediate/int_order_items.sql
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB → 411.24 GiB   +0%   USD +0.00/run
+      ⚠ compiled SQL changed but the model file didn't — an upstream macro or a config change
+  fct_orders_daily  (full-refresh): 819.20 GiB → 819.20 GiB   +0%   USD +0.00/run
+      ⚠ compiled SQL changed but the model file didn't — an upstream macro or a config change
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net change: none
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Seed-only change next, then snapshot-only. Both are dbt resources that cost money to build.
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select orders_snapshot
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Now a macro-only change — the docs say local selection DOES follow the macro closure. Checking that claim.
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  stg_orders: 88.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Adding a materialized_view and a Python model — two node shapes the codebase never names.
+
+$ dbt compile
+20:49:13  Running with dbt=1.12.0
+20:49:13  Registered adapter: duckdb=1.8.4
+20:49:14  Found 7 models, 1 seed, 1 snapshot, 468 macros
+20:49:14  
+20:49:14  Concurrency: 4 threads (target='dev')
+20:49:14  
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  mv_daily_totals: 88.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --format json --select mv_daily_totals,py_customer_scores
+{
+  "mode": "absolute",
+  "verdict": {
+    "status": "pass",
+    "exit_code": 0,
+    "breaches": []
+  },
+  "pricing": {
+    "regions": {
+      "US": 6.25
+    },
+    "region_sources": {
+      "US": "region-table"
+    },
+    "source": "built-in table",
+    "table_version": "2026.07",
+    "last_verified": "2026-07-25",
+    "currency": "USD",
+    "priced": true
+  },
+  "notices": [],
+  "net": {
+    "bytes": null,
+    "usd_per_run": null,
+    "usd_per_month": null,
+    "models_estimated": 1,
+    "models_total": 1
+  },
+  "models": [
+    {
+      "name": "mv_daily_totals",
+      "unique_id": "model.jaffle.mv_daily_totals",
+      "is_incremental": false,
+      "basis": "direct",
+      "is_new": false,
+      "gateable": true,
+      "region": "US",
+      "bytes_baseline": null,
+      "bytes_current": 92274688,
+      "usd_baseline": null,
+      "usd_current": 0.0005245208740234375,
+      "usd_per_run_delta": 0.0005245208740234375,
+      "usd_per_month_delta": null,
+      "pct_delta": null,
+      "runs_per_month": null,
+      "warnings": [],
+      "error": null
+    }
+  ]
+}
+[exit 0]
+
+### SECTION 5 — An incremental model has two prices. Right now the target is fresh, so dbt compiled the FULL-REFRESH shape. Build the tables with dbt run, recompile, and dbt emits the INCREMENTAL shape instead.
+
+$ dbt run
+20:49:50  Running with dbt=1.12.0
+20:49:50  Registered adapter: duckdb=1.8.4
+20:49:50  Found 6 models, 1 seed, 1 snapshot, 468 macros
+20:49:50  
+20:49:50  Concurrency: 4 threads (target='dev')
+20:49:50  
+20:49:51  1 of 5 START sql view model main.stg_customers ................................. [RUN]
+20:49:51  2 of 5 START sql view model main.stg_orders .................................... [RUN]
+20:49:51  2 of 5 OK created sql view model main.stg_orders ............................... [OK in 0.07s]
+20:49:51  1 of 5 ERROR creating sql view model main.stg_customers ........................ [ERROR in 0.08s]
+20:49:51  3 of 5 SKIP relation main.dim_new_metric ....................................... [SKIP]
+20:49:51  4 of 5 SKIP relation main.dim_customers ........................................ [SKIP]
+20:49:51  5 of 5 SKIP relation main.fct_orders_daily ..................................... [SKIP]
+20:49:51  
+20:49:51  Finished running 1 incremental model, 2 table models, 2 view models in 0 hours 0 minutes and 0.24 seconds (0.24s).
+20:49:51  
+20:49:51  Completed with 1 error, 0 partial successes, and 0 warnings:
+20:49:51  
+20:49:51  [ERROR]: in model stg_customers (models/staging/stg_customers.sql)
+20:49:51    Runtime Error in model stg_customers (models/staging/stg_customers.sql)
+  Catalog Error: Table with name raw_customers does not exist!
+  Did you mean "information_schema.character_sets"?
+  
+  LINE 11: from "jaffle"."main"."raw_customers"
+                ^
+20:49:51  
+20:49:51    compiled code at target/compiled/jaffle/models/staging/stg_customers.sql
+20:49:51  
+20:49:51  Done. PASS=1 WARN=0 ERROR=1 SKIP=3 NO-OP=0 REUSED=0 TOTAL=5
+[exit 1]
+
+$ dbt compile
+20:49:52  Running with dbt=1.12.0
+20:49:53  Registered adapter: duckdb=1.8.4
+20:49:53  Found 6 models, 1 seed, 1 snapshot, 468 macros
+20:49:53  
+20:49:53  Concurrency: 4 threads (target='dev')
+20:49:53  
+[exit 0]
+
+$ dbt-costgate check --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 2.91 TiB scanned   USD 18.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt seed
+20:50:05  Running with dbt=1.12.0
+20:50:05  Registered adapter: duckdb=1.8.4
+20:50:06  Found 6 models, 1 seed, 1 snapshot, 468 macros
+20:50:06  
+20:50:06  Concurrency: 4 threads (target='dev')
+20:50:06  
+20:50:06  1 of 1 START seed file main.raw_customers ...................................... [RUN]
+20:50:06  1 of 1 OK loaded seed file main.raw_customers .................................. [INSERT 4 in 0.07s]
+20:50:06  
+20:50:06  Finished running 1 seed in 0 hours 0 minutes and 0.22 seconds (0.22s).
+20:50:06  
+20:50:06  Completed successfully
+20:50:06  
+20:50:06  Done. PASS=1 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=1
+[exit 0]
+
+$ dbt run
+20:50:08  Running with dbt=1.12.0
+20:50:08  Registered adapter: duckdb=1.8.4
+20:50:08  Found 6 models, 1 seed, 1 snapshot, 468 macros
+20:50:08  
+20:50:08  Concurrency: 4 threads (target='dev')
+20:50:08  
+20:50:08  1 of 5 START sql view model main.stg_customers ................................. [RUN]
+20:50:08  2 of 5 START sql view model main.stg_orders .................................... [RUN]
+20:50:08  1 of 5 OK created sql view model main.stg_customers ............................ [OK in 0.08s]
+20:50:08  3 of 5 START sql table model main.dim_new_metric ............................... [RUN]
+20:50:08  2 of 5 OK created sql view model main.stg_orders ............................... [OK in 0.08s]
+20:50:08  4 of 5 START sql table model main.dim_customers ................................ [RUN]
+20:50:08  5 of 5 START sql incremental model main.fct_orders_daily ....................... [RUN]
+20:50:08  3 of 5 OK created sql table model main.dim_new_metric .......................... [OK in 0.07s]
+20:50:09  5 of 5 OK created sql incremental model main.fct_orders_daily .................. [OK in 0.06s]
+20:50:09  4 of 5 OK created sql table model main.dim_customers ........................... [OK in 0.07s]
+20:50:09  
+20:50:09  Finished running 1 incremental model, 2 table models, 2 view models in 0 hours 0 minutes and 0.31 seconds (0.31s).
+20:50:09  
+20:50:09  Completed successfully
+20:50:09  
+20:50:09  Done. PASS=5 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=5
+[exit 0]
+
+$ dbt compile
+20:50:10  Running with dbt=1.12.0
+20:50:10  Registered adapter: duckdb=1.8.4
+20:50:11  Found 6 models, 1 seed, 1 snapshot, 468 macros
+20:50:11  
+20:50:11  Concurrency: 4 threads (target='dev')
+20:50:11  
+[exit 0]
+
+### Same model, same command — but the target now holds a built table, so dbt emitted the incremental query. Watch the row tag and the footnote change.
+
+$ dbt-costgate check --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 112.50 GiB scanned   USD 0.69/run
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Now the trap: diff an INCREMENTAL-form branch against a FULL-REFRESH baseline. Comparing those two numbers is meaningless — does it notice?
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily --max-pct 25
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 819.20 GiB → 112.50 GiB   -86%   USD -4.31/run
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+      ⚠ mixed basis — baseline is full_refresh, current is incremental_form; recompile the baseline the same way
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  Net saving: USD 4.31/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 6 — Configuration. A committed .dbt-costgate.yml with thresholds, a per-model run frequency, and one model excluded from gating.
+
+$ cat .dbt-costgate.yml
+thresholds:
+  max_usd_increase_per_run: 5.00
+  max_pct_increase: 25
+run_frequency:
+  default: 30
+  models:
+    fct_orders_daily: 24
+exclude:
+  - dim_new_metric
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +316.46/month (24 runs)
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+      ⚠ mixed basis — baseline is full_refresh, current is incremental_form; recompile the baseline the same way
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+      ⚠ excluded from gating by config
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  Net increase: USD 13.19/run · USD 316.53/month
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### A CLI flag must beat the file. Raising the cap on the command line should turn that FAIL into a PASS.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --max-usd-per-run 999 --max-pct 999
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +316.46/month (24 runs)
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+      ⚠ mixed basis — baseline is full_refresh, current is incremental_form; recompile the baseline the same way
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
+      ⚠ excluded from gating by config
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  Net increase: USD 13.19/run · USD 316.53/month
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Note what just happened: +264% against a 25% threshold, USD +13.19 against a USD 5.00 cap — and the verdict is PASS, exit 0. The basis mismatch made the model un-gateable. Confirming that is deterministic and not a fluke of my scenario.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily --max-usd-per-run 0.01 --max-pct 1 --max-usd-total 0.01 --max-tib-total 0.001 --fail-on fail
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +316.46/month (24 runs)
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+      ⚠ mixed basis — baseline is full_refresh, current is incremental_form; recompile the baseline the same way
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  Net increase: USD 13.19/run · USD 316.46/month
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Now recompile with --full-refresh so both sides share a basis, and rerun the same thresholds.
+
+$ dbt compile --full-refresh
+20:51:33  Running with dbt=1.12.0
+20:51:33  Registered adapter: duckdb=1.8.4
+20:51:34  Found 6 models, 1 snapshot, 1 seed, 468 macros
+20:51:34  
+20:51:34  Concurrency: 4 threads (target='dev')
+20:51:34  
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily --max-usd-per-run 0.01 --max-pct 1
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +316.46/month (24 runs)
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run · USD 316.46/month
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 0.01
+    - fct_orders_daily: +264% exceeds 1%
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### SECTION 7 — Config edge cases. What happens when the YAML is wrong in ordinary, easy-to-make ways.
+
+$ cat .dbt-costgate.yml
+exclude: dim_new_metric
+thresholds:
+  max_usd_increase_per_run: 5.00
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --format json --select dim_new_metric
+{
+  "mode": "diff",
+  "verdict": {
+    "status": "pass",
+    "exit_code": 0,
+    "breaches": []
+  },
+  "pricing": {
+    "regions": {
+      "US": 6.25
+    },
+    "region_sources": {
+      "US": "region-table"
+    },
+    "source": "built-in table",
+    "table_version": "2026.07",
+    "last_verified": "2026-07-25",
+    "currency": "USD",
+    "priced": true
+  },
+  "notices": [],
+  "net": {
+    "bytes": 432537600,
+    "usd_per_run": 0.0024586915969848633,
+    "usd_per_month": null,
+    "models_estimated": 1,
+    "models_total": 1
+  },
+  "models": [
+    {
+      "name": "dim_new_metric",
+      "unique_id": "model.jaffle.dim_new_metric",
+      "is_incremental": false,
+      "basis": "direct",
+      "is_new": true,
+      "gateable": true,
+      "region": "US",
+      "bytes_baseline": null,
+      "bytes_current": 432537600,
+      "usd_baseline": null,
+      "usd_current": 0.0024586915969848633,
+      "usd_per_run_delta": 0.0024586915969848633,
+      "usd_per_month_delta": null,
+      "pct_delta": null,
+      "runs_per_month": null,
+      "warnings": [],
+      "error": null
+    }
+  ]
+}
+[exit 0]
+
+### config: warn_only: fct_orders_daily|thresholds:|  max_usd_increase_per_run: 5.00
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### config: fail_on: yes|thresholds:|  max_usd_increase_per_run: 5.00
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### config: report:|  format: markdwn
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### config: fail_on: never|thresholds:|  max_usd_increase_per_run: 5.00
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: WARN
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### config: fail_on: no|thresholds:|  max_usd_increase_per_run: 5.00
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: FAIL
+    - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### config: notices:|  silence:|    - dead-money-threshold
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate: notices.silence: unknown notice id(s) dead-money-threshold. Valid ids: dead-money-thresholds, unverified-region-rate.
+[exit 2]
+
+### config: thresholds:|  max_usd_increase_per_run: "five dollars"
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 301, in run_check
+    config = Config.load(Path(args.config) if args.config else None, project_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 82, in load
+    return cls._from_dict(raw)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 96, in _from_dict
+    max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 160, in _opt_float
+    return None if v is None else float(v)
+                                  ^^^^^^^^
+ValueError: could not convert string to float: 'five dollars'
+[exit 1]
+
+### config: thresholds: [this, is, a, list]
+
+$ dbt-costgate check --select fct_orders_daily
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 301, in run_check
+    config = Config.load(Path(args.config) if args.config else None, project_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 82, in load
+    return cls._from_dict(raw)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 96, in _from_dict
+    max_usd_increase_per_run=_opt_float(thr.get("max_usd_increase_per_run")),
+                                        ^^^^^^^
+AttributeError: 'list' object has no attribute 'get'
+[exit 1]
+
+### config: pricing: 5
+
+$ dbt-costgate check --select fct_orders_daily
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 301, in run_check
+    config = Config.load(Path(args.config) if args.config else None, project_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 82, in load
+    return cls._from_dict(raw)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 91, in _from_dict
+    region=pricing.get("region"),
+           ^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'get'
+[exit 1]
+
+### config: pricing:|  currency: EURO
+
+$ dbt-costgate check --select fct_orders_daily
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 301, in run_check
+    config = Config.load(Path(args.config) if args.config else None, project_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 82, in load
+    return cls._from_dict(raw)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 94, in _from_dict
+    currency=_opt_currency(pricing.get("currency")),
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 130, in _opt_currency
+    raise ValueError(
+ValueError: pricing.currency: expected a three-letter ISO 4217 code such as USD or EUR, got 'EURO'
+[exit 1]
+
+### config: thresholds:|  max_usd_increase_per_run: 5.00|  : broken
+
+$ dbt-costgate check --select fct_orders_daily
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 301, in run_check
+    config = Config.load(Path(args.config) if args.config else None, project_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/config.py", line 81, in load
+    raw = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/__init__.py", line 125, in safe_load
+    return load(stream, SafeLoader)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/__init__.py", line 81, in load
+    return loader.get_single_data()
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/constructor.py", line 49, in get_single_data
+    node = self.get_single_node()
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 36, in get_single_node
+    document = self.compose_document()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 55, in compose_document
+    node = self.compose_node(None, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 84, in compose_node
+    node = self.compose_mapping_node(anchor)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 133, in compose_mapping_node
+    item_value = self.compose_node(node, item_key)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 84, in compose_node
+    node = self.compose_mapping_node(anchor)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/composer.py", line 127, in compose_mapping_node
+    while not self.check_event(MappingEndEvent):
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/parser.py", line 98, in check_event
+    self.current_event = self.state()
+                         ^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
+    raise ParserError("while parsing a block mapping", self.marks[-1],
+yaml.parser.ParserError: while parsing a block mapping
+  in "<unicode string>", line 2, column 3:
+      max_usd_increase_per_run: 5.00
+      ^
+expected <block end>, but found ':'
+  in "<unicode string>", line 3, column 3:
+      : broken
+      ^
+[exit 1]
+
+### config: this_key_does_not_exist: 42|thresholds:|  max_usd_totl: 20
+
+$ dbt-costgate check --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 2.91 TiB scanned   USD 18.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 8 — Pricing. Region auto-detected from the dry-run job, then a region the bundled table has never heard of.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: europe-west3 · on-demand USD 8.12/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +17.14/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 17.14/run
+
+  GATE: PASS
+
+  Pricing: europe-west3 USD 8.12/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: northamerica-northeast3 · on-demand USD 6.25/TiB · default fallback
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: PASS
+
+  ⚠ unverified-region-rate: No verified rate for northamerica-northeast3 — priced at the USD 6.25/TiB default, which is the lowest rate BigQuery charges anywhere, so the cost shown may be understated. Set the rate you actually pay: pricing.regions (northamerica-northeast3: <rate>) for that location, pricing.usd_per_tib for one flat rate everywhere, or pricing.region to pin pricing to a location you have a rate for. Your value always wins over the built-in table. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [unverified-region-rate].
+  Pricing: northamerica-northeast3 USD 6.25/TiB · default fallback (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Capacity/slots pricing: rate 0 means there is no per-byte price, so money should disappear from the report entirely.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · bytes only (no per-byte price configured)
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: 2.11 TiB/run scanned
+
+  GATE: FAIL
+    - fct_orders_daily: +264% exceeds 25%
+
+  Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only. Slot/capacity cost cannot be estimated before a query runs.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### Same, but with a dollar threshold left over from before the move to slots — it can never fire.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate — region: US · bytes only (no per-byte price configured)
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: 2.11 TiB/run scanned
+
+  GATE: FAIL
+    - fct_orders_daily: +264% exceeds 25%
+
+  ⚠ dead-money-thresholds: thresholds.max_usd_increase_per_run cannot fire: no per-byte price is configured, so every cost on this run is 0.00 and no dollar figure can exceed a limit. Gate on scanned bytes instead with thresholds.max_pct_increase or thresholds.max_tib_total. Advisory only — it does not affect the gate or the exit code. Silence it with notices.silence: [dead-money-thresholds].
+  Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only. Slot/capacity cost cannot be estimated before a query runs.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### And a non-USD currency label while a region is still priced from the bundled USD table — that would be a lie, so it should refuse.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily
+dbt-costgate: pricing.currency is EUR but the rate applied for US came from the built-in table, which is USD. dbt-costgate does not convert currencies. Set your own EUR rate for those regions with pricing.regions (or pricing.usd_per_tib for all of them), or drop pricing.currency.
+[exit 2]
+
+### SECTION 9 — Failure modes. First: no credentials at all. This is the single most common first-run failure.
+
+$ dbt-costgate check --select fct_orders_daily
+dbt-costgate: fct_orders_daily: other: Your default credentials were not found. To set up Application Default Credentials, see https://cloud.google.com/docs/authentication/external/set-up-adc
+dbt-costgate: could not estimate any model (check credentials/permissions). Try `gcloud auth application-default login`.
+[exit 2]
+
+### Now one model denied by IAM, the rest fine.
+
+$ dbt-costgate check --select fct_orders_daily,dim_customers
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 1.00 GiB scanned   USD 0.01/run
+  fct_orders_daily  (full-refresh): — scanned   not estimated
+      • not estimated — BigQuery denied permission for the dry-run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+dbt-costgate: fct_orders_daily: permission: 403 403 Access Denied: Table jaffle:main.fct_orders_daily: User does not have bigquery.tables.get permission. service account: costgate-ci@acme-prod.iam.gserviceaccount.com
+[exit 0]
+
+### Security invariant: BigQuery quotes the query in its error text, and compiled SQL can carry a templated secret. That message must never reach the report — only the job log.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --format markdown
+### 💸 dbt-costgate — cost impact of this change (2 models)
+
+| Model | Baseline | This change | Δ % | Δ / run | Δ / month |
+|---|--:|--:|--:|--:|--:|
+| `fct_orders_daily` _full-refresh_ | 819.20 GiB | 2.91 TiB | +264% | USD +13.19 | — |
+| `dim_new_metric` _new_ | — | — | not estimated | not estimated | — |
+
+> • **dim_new_metric** — not estimated — BigQuery rejected the compiled SQL
+> ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+**Net increase:** USD 13.19/run (across 1 of 2 models; the rest were not estimated)
+
+✅ **Gate: PASS**
+
+<sub>Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)<br/>Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
+dbt-costgate: dim_new_metric: invalid_sql: 400 400 Syntax error: Unexpected keyword WHERE at [12:3] for query: select * from t where api_key='sk-live-9f2b7c1d' and 1=1
+[exit 0]
+
+### A plain SQL syntax error — but the line number happens to be 500. Error classification substring-matches '500' anywhere in the message.
+
+$ dbt-costgate check --select dim_customers
+dbt-costgate: dim_customers: transient: 400 Syntax error: Expected end of input but got keyword WHERE at [500:3]
+dbt-costgate: could not estimate any model (check credentials/permissions). Try `gcloud auth application-default login`.
+[exit 2]
+
+### A 404 on an upstream in a different dataset that happens to share the model's table name.
+
+$ dbt-costgate check --select dim_customers
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: — scanned   not estimated
+      • not estimated — an upstream table it reads has not been materialized
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+dbt-costgate: dim_customers: upstream_missing: 404 404 Not found: Table jaffle:raw_landing.dim_customers was not found in location US
+[exit 0]
+
+### Retrying the 404 test against a BigQuery-shaped manifest (backtick quoting, as dbt-bigquery emits). The upstream lives in a different dataset but shares the model's table name.
+
+$ dbt-costgate check --current ../bqshape/target --project-dir . --select dim_customers
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: — scanned   not estimated
+      • not estimated — incremental target not built; compile with --defer --state in a fresh target for the full-refresh estimate
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+dbt-costgate: dim_customers: destination_missing: 404 404 Not found: Table jaffle:raw_landing.dim_customers was not found in location US
+[exit 0]
+
+### Every model 404s — an unbuilt dev schema, or a wrong --project. Does the gate say 'I could not check anything', or 'PASS'?
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_new_metric  (new): — → —   not estimated   not estimated/run
+      • not estimated — an upstream table it reads has not been materialized
+  fct_orders_daily  (full-refresh): — → —   not estimated   not estimated/run
+      ⚠ baseline unavailable — could not dry-run the main version
+      • not estimated — an upstream table it reads has not been materialized
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+dbt-costgate: dim_new_metric: upstream_missing: 404 404 Not found: Table jaffle:raw_landing.everything was not found in location US
+dbt-costgate: fct_orders_daily: upstream_missing: 404 404 Not found: Table jaffle:raw_landing.everything was not found in location US
+[exit 0]
+
+### And the retry path: two 503s then success, driven through the real Retry object the production code builds.
+
+$ dbt-costgate check --select dim_customers
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 10 — Output and concurrency. --output to a file, then to a path that cannot be written.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --format json --output /tmp/costgate-report.json
+[exit 0]
+
+$ head -c 120 /tmp/costgate-report.json
+{
+  "mode": "diff",
+  "verdict": {
+    "status": "pass",
+    "exit_code": 0,
+    "breaches": []
+  },
+  "pricing": {
+    
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --output /no/such/dir/report.txt
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/bin/dbt-costgate", line 12, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 487, in main
+    return run_check(args, runner=runner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-dashanrichards-Desktop-dbt-costgate/5a39bb17-c0cb-4225-bac5-45aa75cefd7e/scratchpad/dbtenv/lib/python3.11/site-packages/dbt_costgate/cli.py", line 430, in run_check
+    Path(args.output).write_text(rendered + "\n", "utf-8")
+  File "/Users/dashanrichards/anaconda3/lib/python3.11/pathlib.py", line 1078, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dashanrichards/anaconda3/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/no/such/dir/report.txt'
+[exit 1]
+
+### Thread count: the flag takes anything.
+
+$ dbt-costgate check --select dim_customers --threads 0
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers --threads -5
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### --threads 0 was harmless with one model. With several, it reaches the thread pool.
+
+$ dbt-costgate check --select dim_customers,stg_orders,stg_customers --threads 0
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+  stg_orders: 88.00 MiB scanned   USD 0.00/run
+  stg_customers: 12.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --select dim_customers,stg_orders,stg_customers --threads -5
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 411.24 GiB scanned   USD 2.51/run
+  stg_orders: 88.00 MiB scanned   USD 0.00/run
+  stg_customers: 12.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### Concurrency check: 5 models, 0.4s per dry-run. Serial would be 2s. Also recording exactly what request the tool builds.
+
+$ dbt-costgate check --select dim_customers,stg_orders,stg_customers,fct_orders_daily,mv_daily_totals --threads 8
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_customers: 1.00 GiB scanned   USD 0.01/run
+  fct_orders_daily  (full-refresh): 1.00 GiB scanned   USD 0.01/run
+  stg_customers: 1.00 GiB scanned   USD 0.01/run
+  stg_orders: 1.00 GiB scanned   USD 0.01/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 11 — A PR that DELETES the most expensive model in the project. That is the single most common deliberate cost reduction. What does the gate say?
+
+$ git diff --stat main
+ models/marts/dim_customers.sql | 11 -----------
+ 1 file changed, 11 deletions(-)
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (incremental): 819.20 GiB → 819.20 GiB   +0%   USD +0.00/run
+      ⚠ dynamic filter — dry-run may be worst-case (overestimate)
+      ⚠ compiled SQL changed but the model file didn't — an upstream macro or a config change
+      ⚠ mixed basis — baseline is full_refresh, current is incremental_form; recompile the baseline the same way
+
+  ⚠ incremental — for the rows tagged above, the figure is one run against the table as already built, so it does not gate rebuild cost.
+
+  Net change: none
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 12 — Named baselines and renames.
+
+$ dbt-costgate check --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline-target stashed --select fct_orders_daily
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 13.19/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline-target nosuch --select fct_orders_daily
+dbt-costgate: baseline target 'nosuch' is not defined under `baselines:` in .dbt-costgate.yml (defined: main, stashed).
+[exit 2]
+
+$ dbt-costgate check --baseline-target broken --select fct_orders_daily
+dbt-costgate: baseline target 'broken' needs exactly one of `manifest:` or `against:`.
+[exit 2]
+
+### Renames: a model that changed name loses its baseline pairing unless you declare it.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select dim_new_metric
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_new_metric: 411.24 GiB → 412.50 MiB   -100%   USD -2.51/run
+      ⚠ compared against renamed baseline `dim_customers`
+
+  Net saving: USD 2.51/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate: renames: baseline model 'never_existed' not found. Use its dbt model name or its full unique_id (e.g. model.<package>.<name>).
+[exit 2]
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json
+dbt-costgate: renames: two or more current models map to the same baseline model; each baseline may be paired with only one current model.
+[exit 2]
+
+### SECTION 13 — Threshold arithmetic at the edges. A model that scanned nothing on main and 2.91 TiB on the branch — infinite growth. Gate on percentage only.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily --max-pct 1
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 0 B → 2.91 TiB   —   USD +18.19/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 18.19/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### A brand-new model, gated on percentage only — the setup a team uses when it only cares about relative growth.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select dim_new_metric --max-pct 1
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  dim_new_metric  (new): — → 412.50 MiB   —   USD +0.00/run
+
+  Net increase: USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### And a 0.4% increase against a 0.3% limit.
+
+$ dbt-costgate check --baseline ../baseline-main-manifest.json --select fct_orders_daily --max-pct 0.3
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  fct_orders_daily  (full-refresh): 953.67 MiB → 957.49 MiB   +0%   USD +0.00/run
+
+  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+  Net increase: USD 0.00/run
+
+  GATE: FAIL
+    - fct_orders_daily: +0% exceeds 0%
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 1]
+
+### SECTION 14 — Broken artifacts. A truncated manifest.json, the kind a killed CI job leaves behind.
+
+$ dbt-costgate check --current ../broken/manifest.json --project-dir . --select dim_customers
+dbt-costgate: ../broken/manifest.json is not valid JSON: Unterminated string starting at: line 1 column 3994 (char 3993)
+[exit 2]
+
+$ dbt-costgate check --current ../broken/empty.json --project-dir .
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  No changed models to estimate.
+
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+$ dbt-costgate check --baseline ../broken/manifest.json --select dim_customers
+dbt-costgate: ../broken/manifest.json is not valid JSON: Unterminated string starting at: line 1 column 3994 (char 3993)
+[exit 2]
+
+### SECTION 15 — Non-ASCII and very long model names. The terminal renderer pads columns by character count, which is not display width for CJK.
+
+$ dbt-costgate check --select '订单汇总,a_very_long_model_name_that_someone_will_absolutely_write_one_day,dim_new_metric'
+dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
+
+  a_very_long_model_name_that_someone_will_absolutely_write_one_day: 1.00 GiB scanned   USD 0.01/run
+  dim_new_metric: 412.50 MiB scanned   USD 0.00/run
+  订单汇总: 12.00 MiB scanned   USD 0.00/run
+
+  GATE: PASS
+
+  Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
+[exit 0]
+
+### SECTION 16 — The remaining surfaces: the config reference, and the two markdown table shapes a PR comment can take without a baseline.
+
+$ dbt-costgate config
+dbt-costgate configuration keys (.dbt-costgate.yml). CLI flags override the file.
+
+pricing.region                         str                           default: none
+    Force the pricing region. Default: auto-detected from the dry-run job location, falling back to US.
+pricing.usd_per_tib                    float                         default: none
+    Flat on-demand rate override (USD/TiB) for every region. Default: the built-in per-region rate table.
+pricing.currency                       str                           default: none
+    ISO 4217 code the reported amounts are labelled with, e.g. EUR. Default: USD, matching the built-in table. This labels a rate you supplied yourself — dbt-costgate never converts between currencies — so any region still priced from the built-in table is an error, not a conversion.
+pricing.regions                        map[str->float]               default: {}
+    Per-region rate overrides (region -> USD/TiB) that patch the built-in table. Keys match case-insensitively; 0 is allowed. Unlisted regions use the table.
+thresholds.max_usd_increase_per_run    float                         default: none
+    Gate fails if a model's per-run cost increase exceeds this many USD.
+thresholds.max_pct_increase            float                         default: none
+    Gate fails if a model's cost increases by more than this percent.
+thresholds.max_usd_increase_per_month  float                         default: none
+    Gate fails if a model's projected monthly cost increase exceeds this many USD.
+thresholds.max_usd_total               float                         default: none
+    Absolute ceiling: gate fails if a model's total per-run cost exceeds this many USD, regardless of its increase. Needs no baseline (works in local mode).
+thresholds.max_tib_total               float                         default: none
+    Absolute ceiling: gate fails if a model's total per-run scan exceeds this many TiB, regardless of its increase. Needs no baseline (works in local mode).
+run_frequency.default                  int                           default: none
+    Assumed runs per month for the monthly-cost estimate, for models without an explicit entry.
+run_frequency.models                   map[str->int]                 default: {}
+    Per-model runs-per-month overrides (model name -> runs) for the monthly estimate.
+exclude                                list[str]                     default: []
+    Model names reported but never gated.
+warn_only                              list[str]                     default: []
+    Model names shown as a warning instead of gated.
+renames                                map[str->str]                 default: {}
+    Pair a renamed model to its baseline for a diff (current -> baseline), for when a model rename changes its unique_id and auto-matching can't. Each side is a model name or a full unique_id. Requires a baseline (diff mode).
+baselines                              map[str->{manifest|against}]  default: {}
+    Named baseline sources (dbt --target analogy). Each name maps to either a `manifest:` path or an `against:` git ref. Select one with --baseline-target <name>; a `manifest` target travels to CI, an `against` target needs git+dbt.
+default_baseline                       str                           default: none
+    Name of the `baselines:` entry to use when no --baseline/--against/--baseline-target is given, so `dbt-costgate check` diffs without a flag.
+report.format                          terminal|markdown|json        default: terminal
+    Output format when not overridden by --format.
+fail_on                                never|warn|fail               default: fail
+    Gate strictness: 'never' never fails the build, 'warn' fails on warnings, 'fail' fails only on threshold breaches.
+notices.silence                        list[str]                     default: []
+    Ids of advisory notices to stop reporting, e.g. dead-money-thresholds on a team that has deliberately priced at 0. Each report prints a notice's id beside it, and `dbt-costgate config` lists them. Silencing is per-notice on purpose: there is no blanket off-switch, so turning one off can never hide a different one you have not seen. An unknown id is an error, not a no-op.
+[exit 0]
+
+$ dbt-costgate config --format json
+[
+  {
+    "key": "pricing.region",
+    "type": "str",
+    "default": null,
+    "help": "Force the pricing region. Default: auto-detected from the dry-run job location, falling back to US."
+  },
+  {
+    "key": "pricing.usd_per_tib",
+    "type": "float",
+    "default": null,
+    "help": "Flat on-demand rate override (USD/TiB) for every region. Default: the built-in per-region rate table."
+  },
+  {
+    "key": "pricing.currency",
+    "type": "str",
+    "default": null,
+    "help": "ISO 4217 code the reported amounts are labelled with, e.g. EUR. Default: USD, matching the built-in table. This labels a rate you supplied yourself \u2014 dbt-costgate never converts between currencies \u2014 so any region still priced from the built-in table is an error, not a conversion."
+  },
+  {
+    "key": "pricing.regions",
+    "type": "map[str->float]",
+    "default": {},
+    "help": "Per-region rate overrides (region -> USD/TiB) that patch the built-in table. Keys match case-insensitively; 0 is allowed. Unlisted regions use the table."
+  },
+  {
+    "key": "thresholds.max_usd_increase_per_run",
+    "type": "float",
+    "default": null,
+    "help": "Gate fails if a model's per-run cost increase exceeds this many USD."
+  },
+  {
+    "key": "thresholds.max_pct_increase",
+    "type": "float",
+    "default": null,
+    "help": "Gate fails if a model's cost increases by more than this percent."
+  },
+  {
+    "key": "thresholds.max_usd_increase_per_month",
+    "type": "float",
+    "default": null,
+    "help": "Gate fails if a model's projected monthly cost increase exceeds this many USD."
+  },
+  {
+    "key": "thresholds.max_usd_total",
+    "type": "float",
+    "default": null,
+    "help": "Absolute ceiling: gate fails if a model's total per-run cost exceeds this many USD, regardless of its increase. Needs no baseline (works in local mode)."
+  },
+  {
+    "key": "thresholds.max_tib_total",
+    "type": "float",
+    "default": null,
+    "help": "Absolute ceiling: gate fails if a model's total per-run scan exceeds this many TiB, regardless of its increase. Needs no baseline (works in local mode)."
+  },
+  {
+    "key": "run_frequency.default",
+    "type": "int",
+    "default": null,
+    "help": "Assumed runs per month for the monthly-cost estimate, for models without an explicit entry."
+  },
+  {
+    "key": "run_frequency.models",
+    "type": "map[str->int]",
+    "default": {},
+    "help": "Per-model runs-per-month overrides (model name -> runs) for the monthly estimate."
+  },
+  {
+    "key": "exclude",
+    "type": "list[str]",
+    "default": [],
+    "help": "Model names reported but never gated."
+  },
+  {
+    "key": "warn_only",
+    "type": "list[str]",
+    "default": [],
+    "help": "Model names shown as a warning instead of gated."
+  },
+  {
+    "key": "renames",
+    "type": "map[str->str]",
+    "default": {},
+    "help": "Pair a renamed model to its baseline for a diff (current -> baseline), for when a model rename changes its unique_id and auto-matching can't. Each side is a model name or a full unique_id. Requires a baseline (diff mode)."
+  },
+  {
+    "key": "baselines",
+    "type": "map[str->{manifest|against}]",
+    "default": {},
+    "help": "Named baseline sources (dbt --target analogy). Each name maps to either a `manifest:` path or an `against:` git ref. Select one with --baseline-target <name>; a `manifest` target travels to CI, an `against` target needs git+dbt."
+  },
+  {
+    "key": "default_baseline",
+    "type": "str",
+    "default": null,
+    "help": "Name of the `baselines:` entry to use when no --baseline/--against/--baseline-target is given, so `dbt-costgate check` diffs without a flag."
+  },
+  {
+    "key": "report.format",
+    "type": "terminal|markdown|json",
+    "default": "terminal",
+    "help": "Output format when not overridden by --format."
+  },
+  {
+    "key": "fail_on",
+    "type": "never|warn|fail",
+    "default": "fail",
+    "help": "Gate strictness: 'never' never fails the build, 'warn' fails on warnings, 'fail' fails only on threshold breaches."
+  },
+  {
+    "key": "notices.silence",
+    "type": "list[str]",
+    "default": [],
+    "help": "Ids of advisory notices to stop reporting, e.g. dead-money-thresholds on a team that has deliberately priced at 0. Each report prints a notice's id beside it, and `dbt-costgate config` lists them. Silencing is per-notice on purpose: there is no blanket off-switch, so turning one off can never hide a different one you have not seen. An unknown id is an error, not a no-op."
+  }
+]
+[exit 0]
+
+$ dbt-costgate check --select dim_new_metric,fct_orders_daily --format markdown --max-usd-total 1
+### 💸 dbt-costgate — cost impact of this change (2 models)
+
+| Model | Scanned | Cost / run | Cost / month |
+|---|--:|--:|--:|
+| `fct_orders_daily` _full-refresh_ | 2.91 TiB | USD 18.19 | — |
+| `dim_new_metric` | 412.50 MiB | USD 0.00 | — |
+
+> ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+❌ **Gate: FAIL**
+- fct_orders_daily: USD 18.19/run exceeds cap USD 1.00
+
+<sub>Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)<br/>Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
+[exit 1]
+
+$ dbt-costgate check --select dim_new_metric,fct_orders_daily --format markdown --max-tib-total 1
+### 💸 dbt-costgate — cost impact of this change (2 models)
+
+| Model | Scanned |
+|---|--:|
+| `dim_new_metric` | 412.50 MiB |
+| `fct_orders_daily` _full-refresh_ | 2.91 TiB |
+
+> ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+
+❌ **Gate: FAIL**
+- fct_orders_daily: 2.91 TiB/run exceeds cap 1.00 TiB
+
+<sub>Pricing: none applied — rate is 0 for US, so this report measures scanned bytes only. Slot/capacity cost cannot be estimated before a query runs.<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
+[exit 1]

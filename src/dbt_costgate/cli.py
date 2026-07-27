@@ -4,15 +4,27 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from dbt_costgate import __version__, against, artifacts, estimate, gitdiff, notices, policy, report
+from dbt_costgate import (
+    __version__,
+    against,
+    artifacts,
+    estimate,
+    gitdiff,
+    layout,
+    notices,
+    policy,
+    report,
+)
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
-from dbt_costgate.config import CONFIG_REFERENCE, Config, render_config_template
+from dbt_costgate.config import CONFIG_REFERENCE, Config, ConfigError, render_config_template
 from dbt_costgate.gitdiff import GitDiffError
 from dbt_costgate.models import PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
@@ -82,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--format", choices=["terminal", "markdown", "json"], help="Output format.")
     check.add_argument("--output", help="Write the report to this file instead of stdout.")
+    check.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Colour the terminal report (default: auto — on at a terminal, off when "
+        "piped or when NO_COLOR is set).",
+    )
     check.add_argument("--threads", type=int, default=8, help="Parallel dry-runs (default: 8).")
     check.add_argument("--project", help="BigQuery project for dry-run jobs (default: ADC).")
     check.add_argument("--region", help="Force a pricing region (default: auto-detect).")
@@ -231,14 +250,69 @@ def _validate_resolved_config(table: PricingTable, config: Config, disclosure) -
         )
 
 
+def _unmatched_selection(missing, current_nodes, out_of_scope: dict[str, str]) -> str:
+    """The message for a `--select` name that selected nothing.
+
+    A name can miss for two quite different reasons, and telling them apart is
+    the whole value of the message: the model may not exist (a typo, or a stale
+    list), or it may exist and be a kind dbt-costgate does not price. "No such
+    model" for a snapshot the user can see in their project reads as a bug in the
+    tool.
+    """
+    known = sorted(node.name for node in current_nodes.values())
+    parts = []
+    for name in missing:
+        if name in out_of_scope:
+            parts.append(f"{name} — {out_of_scope[name]}")
+            continue
+        close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+        parts.append(f"{name} (did you mean {close[0]}?)" if close else f"{name} — no such model")
+    return "--select matched nothing for: " + "; ".join(parts) + "."
+
+
+@dataclass
+class _Selection:
+    """What `_select` worked out.
+
+    `notes` explains, per unique_id, why a model was selected when its own file
+    was not what changed. `paths` is the git diff the local path used, kept so
+    the caller can say which out-of-scope nodes a change touched — and `None`
+    when selection did not come from a diff at all.
+    """
+
+    uids: list[str]
+    notes: dict[str, str] = field(default_factory=dict)
+    paths: list[str] | None = None
+
+
 def _select(
-    args, current_nodes, baseline_nodes, project_dir, renames=None, macros=None
-) -> list[str]:
+    args,
+    current_nodes,
+    baseline_nodes,
+    project_dir,
+    renames=None,
+    macros=None,
+    out_of_scope=None,
+    ephemeral=None,
+) -> _Selection:
+    out_of_scope = out_of_scope or {}
     if args.select:
         wanted = {s.strip() for s in args.select.split(",") if s.strip()}
-        return [uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted]
+        selected = [
+            uid for uid, node in current_nodes.items() if node.name in wanted or uid in wanted
+        ]
+        # A name that matched nothing is a usage error, not an empty selection.
+        # It used to return `[]` in silence, so `--select` built from a script —
+        # the pattern the docs recommend, piping `dbt ls --select state:modified`
+        # — checked nothing at all the day that list went stale, and the pull
+        # request went green.
+        matched = set(selected) | {current_nodes[uid].name for uid in selected}
+        missing = sorted(wanted - matched)
+        if missing:
+            raise _UsageError(_unmatched_selection(missing, current_nodes, out_of_scope))
+        return _Selection(selected)
     if baseline_nodes is not None:
-        return artifacts.select_changed(baseline_nodes, current_nodes, renames)
+        return _Selection(artifacts.select_changed(baseline_nodes, current_nodes, renames))
     paths = gitdiff.changed_paths(project_dir, args.base)
     if artifacts.touches_project_config(paths):
         print(
@@ -246,7 +320,8 @@ def _select(
             "to individual models; price the affected ones with --select.",
             file=sys.stderr,
         )
-    return artifacts.select_by_paths(current_nodes, paths, macros)
+    uids, notes = artifacts.select_by_paths(current_nodes, paths, macros, ephemeral)
+    return _Selection(uids, notes, paths)
 
 
 class _UsageError(Exception):
@@ -298,8 +373,12 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             )
             return policy.EXIT_OPERATIONAL
 
-    config = Config.load(Path(args.config) if args.config else None, project_dir)
-    config = _apply_overrides(config, args)
+    try:
+        config = Config.load(Path(args.config) if args.config else None, project_dir)
+        config = _apply_overrides(config, args)
+    except ConfigError as exc:
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
 
     # Resolve the baseline source: an explicit --baseline/--against, else a named
     # --baseline-target / config default_baseline (each a manifest path or a git ref).
@@ -314,13 +393,19 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     except ArtifactError as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
+    adapter_problem = artifacts.adapter_problem(current_manifest)
+    if adapter_problem:
+        print(f"dbt-costgate: {adapter_problem}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
+
     current_nodes = artifacts.model_nodes(current_manifest)
     macros = artifacts.macro_index(current_manifest)
+    out_of_scope = artifacts.out_of_scope_nodes(current_manifest)
 
     baseline_nodes = None
     if eff_baseline:
         try:
-            baseline_manifest = artifacts.load_manifest(Path(eff_baseline))
+            baseline_manifest = artifacts.load_manifest(Path(eff_baseline), "--baseline")
         except ArtifactError as exc:
             print(f"dbt-costgate: {exc}", file=sys.stderr)
             return policy.EXIT_OPERATIONAL
@@ -360,16 +445,42 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
             return policy.EXIT_OPERATIONAL
 
     try:
-        selected = _select(args, current_nodes, baseline_nodes, project_dir, renames, macros)
-    except GitDiffError as exc:
+        selection = _select(
+            args,
+            current_nodes,
+            baseline_nodes,
+            project_dir,
+            renames,
+            macros,
+            out_of_scope,
+            artifacts.ephemeral_index(current_manifest),
+        )
+    except (GitDiffError, _UsageError) as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL
+    selected = selection.uids
 
     # Models the diff picked up from their compiled SQL alone; each carries a
-    # warning saying so, since the change is upstream of the model's own file.
-    indirect: set[str] = set()
+    # note saying so, since the change is upstream of the model's own file.
     if baseline_nodes is not None and not args.select:
-        indirect = artifacts.indirect_changes(baseline_nodes, current_nodes)
+        for uid in artifacts.indirect_changes(baseline_nodes, current_nodes):
+            selection.notes[uid] = (
+                "compiled SQL changed but the model file didn't — an upstream macro "
+                "or a config change"
+            )
+
+    # "Nothing to estimate" and "what you changed is not something I price" are
+    # different answers and used to read identically. Said on every run rather
+    # than only an empty one: a change that touches three models and a snapshot
+    # has an unpriced snapshot in it either way, and a snapshot runs a MERGE.
+    # stderr, so it never reaches a pull-request comment as if it were a figure.
+    touched = artifacts.changed_out_of_scope(
+        current_manifest,
+        baseline_manifest if baseline_nodes is not None and eff_baseline else None,
+        selection.paths,
+    )
+    for name, reason in sorted(touched.items()):
+        print(f"dbt-costgate: {name} changed but is not priced — {reason}.", file=sys.stderr)
 
     diff_mode = baseline_nodes is not None
     if runner is None:
@@ -384,7 +495,7 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         diff_mode=diff_mode,
         threads=args.threads,
         renames=renames,
-        indirect=indirect,
+        notes=selection.notes,
     )
 
     _log_error_details(estimates)
@@ -422,12 +533,32 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
         disclosure=disclosure,
         verdict=verdict,
         mode="diff" if diff_mode else "absolute",
-        notices=notices.collect(config, table, disclosure),
+        notices=notices.collect(config, table, disclosure, deltas),
     )
 
-    rendered = report.render(rep, config.report_format)
-    if args.output:
-        Path(args.output).write_text(rendered + "\n", "utf-8")
+    # A report going to a file is not going to this terminal: it is rendered at a
+    # fixed width with no escape sequences, so a committed or CI-captured report
+    # never depends on the window that produced it.
+    to_file = bool(args.output)
+    rendered = report.render(
+        rep,
+        config.report_format,
+        width=layout.DEFAULT_WIDTH if to_file else layout.terminal_width(sys.stdout),
+        color=not to_file and layout.should_color(args.color, sys.stdout),
+    )
+    if to_file:
+        try:
+            Path(args.output).write_text(rendered + "\n", "utf-8")
+        except OSError as exc:
+            # Every dry-run succeeded and the report rendered; only the write
+            # failed. That is the gate's own plumbing, not a cost regression, so
+            # it exits 2 — unguarded it threw a completed run away as a traceback
+            # and exit 1, which CI reads as "the author broke something".
+            print(
+                f"dbt-costgate: could not write the report to {args.output}: {exc}",
+                file=sys.stderr,
+            )
+            return policy.EXIT_OPERATIONAL
     else:
         print(rendered)
     return verdict.exit_code

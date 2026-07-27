@@ -177,10 +177,10 @@ an unexplained number:
 ```text
 dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 
-  fct_orders_daily  (full-refresh): 819.20 GiB → 2.91 TiB   +264%   USD +13.19/run   USD +52.75/month (4 runs)
-  dim_customers  (new): — → 412.50 MiB   —   USD +0.00/run   USD +0.07/month (30 runs)
-
-  ⚠ full-refresh — for the rows tagged above, the figure is the cost of rebuilding the table, not of one incremental run.
+  MODEL                             BASELINE     CURRENT    Δ %     Δ / RUN   Δ / MONTH  RUNS
+  ────────────────  ────────────  ──────────  ──────────  ─────  ──────────  ──────────  ────
+  fct_orders_daily  full-refresh  819.20 GiB    2.91 TiB  +264%  USD +13.19  USD +52.75     4
+  dim_customers     new                    —  412.50 MiB      —   USD +0.00   USD +0.07    30
 
   Net increase: USD 13.19/run · USD 52.82/month
 
@@ -188,8 +188,14 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
     - fct_orders_daily: USD +13.19/run exceeds USD 5.00
     - fct_orders_daily: +264% exceeds 25%
 
+  NOTES
+    ⚠ full-refresh — rows tagged full-refresh show what it costs to build the whole table from
+      scratch. A normal incremental run scans much less, so read this as the ceiling rather than the
+      nightly bill.
+
   Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)
-  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.
+  Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing
+    account, so it is disclosed here and never deducted.
   Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.
 ```
 <!-- END GENERATED: mixed-frequency-terminal -->
@@ -324,7 +330,7 @@ you uncomment something.
 | `baselines` | `map[str->{manifest|against}]` | _empty_ | Named baseline sources (dbt --target analogy). Each name maps to either a `manifest:` path or an `against:` git ref. Select one with --baseline-target <name>; a `manifest` target travels to CI, an `against` target needs git+dbt. |
 | `default_baseline` | `str` | _none_ | Name of the `baselines:` entry to use when no --baseline/--against/--baseline-target is given, so `dbt-costgate check` diffs without a flag. |
 | `report.format` | `terminal|markdown|json` | `terminal` | Output format when not overridden by --format. |
-| `fail_on` | `never|warn|fail` | `fail` | Gate strictness: 'never' never fails the build, 'warn' fails on warnings, 'fail' fails only on threshold breaches. |
+| `fail_on` | `never|warn|fail` | `fail` | Gate strictness. 'never' reports breaches but always exits 0. 'fail' (the default) and 'warn' both exit 1 on a breach; they differ only in the label the report prints, FAIL or WARN. Warnings themselves are never an input to the gate. |
 | `notices.silence` | `list[str]` | _empty_ | Ids of advisory notices to stop reporting, e.g. dead-money-thresholds on a team that has deliberately priced at 0. Each report prints a notice's id beside it, and `dbt-costgate config` lists them. Silencing is per-notice on purpose: there is no blanket off-switch, so turning one off can never hide a different one you have not seen. An unknown id is an error, not a no-op. |
 <!-- END GENERATED: config-reference -->
 
