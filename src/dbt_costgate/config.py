@@ -99,7 +99,7 @@ class Config:
         try:
             raw = yaml.safe_load(cfg_path.read_text("utf-8"))
         except yaml.YAMLError as exc:
-            raise ConfigError(f"{cfg_path} is not valid YAML: {exc}") from exc
+            raise ConfigError(f"{cfg_path} is not valid YAML: {_yaml_problem(exc)}") from exc
         except OSError as exc:
             raise ConfigError(f"{cfg_path} could not be read: {exc}") from exc
         if raw is None:
@@ -110,7 +110,9 @@ class Config:
                 f"got {type(raw).__name__}. Run `dbt-costgate config` for the key list."
             )
         try:
-            return cls._from_dict(raw)
+            config = cls._from_dict(raw)
+            validate_numbers(config)
+            return config
         except ConfigError as exc:
             # Re-raised with the path in front: the parser knows which key is
             # wrong and not which of several discoverable files it came from.
@@ -171,6 +173,25 @@ _REPORT_FORMATS = ("terminal", "markdown", "json")
 # hand-kept list here would parse as absent, which is a threshold the user
 # configured and the gate never applied.
 _THRESHOLD_KEYS = tuple(f.name for f in fields(Thresholds))
+
+
+def _yaml_problem(exc: Exception) -> str:
+    """The readable half of a PyYAML parse error.
+
+    PyYAML's own `str()` is a four-line block with a caret diagram and its
+    internal name for the input — "<unicode string>", because we hand it text we
+    read ourselves rather than a file. Composed into a one-line message that
+    flattens into a run-on that buries the two parts a person needs: what is
+    wrong, and where.
+    """
+    problem = getattr(exc, "problem", None)
+    if not problem:
+        return " ".join(str(exc).split())
+    mark = getattr(exc, "problem_mark", None)
+    if mark is None:
+        return f"{problem}."
+    # PyYAML counts from zero; people count from one.
+    return f"{problem} (line {mark.line + 1}, column {mark.column + 1})."
 
 
 def _reject_unknown(raw: dict) -> None:
@@ -268,34 +289,25 @@ def _opt_currency(raw) -> str | None:
     if not (len(code) == 3 and code.isalpha()):
         raise ConfigError(
             f"pricing.currency: expected a three-letter ISO 4217 code such as USD or EUR, "
-            f"got {raw!r}"
+            f"got {raw!r}."
         )
     return code
 
 
 def _region_rates(raw) -> dict[str, float]:
-    """Parse a `pricing.regions` map. A rate may be 0 (flat-rate slots), but a
-    negative rate is nonsense and would silently subtract cost."""
-    rates: dict[str, float] = {}
-    for region, value in _mapping(raw, "pricing.regions").items():
-        key = f"pricing.regions[{region!r}]"
-        rate = _req_float(value, key)
-        if rate < 0:
-            raise ConfigError(f"{key}: rate must be >= 0, got {rate}")
-        rates[region] = rate
-    return rates
+    """Parse a `pricing.regions` map. A rate may be 0 (flat-rate slots); the
+    lower bound is enforced for every numeric key at once by `validate_numbers`."""
+    return {
+        region: _req_float(value, f"pricing.regions[{region!r}]")
+        for region, value in _mapping(raw, "pricing.regions").items()
+    }
 
 
 def _free_tib(raw) -> float | None:
     """Parse `pricing.free_tib_per_month`. 0 is legal and means "declared, and
     none of it available", which is a different statement from leaving the key
-    out; a negative allowance is nonsense and would add to the figure it is meant
-    to relieve."""
-    key = "pricing.free_tib_per_month"
-    value = _opt_float(raw, key)
-    if value is not None and value < 0:
-        raise ConfigError(f"{key}: allowance must be >= 0, got {value}")
-    return value
+    out."""
+    return _opt_float(raw, "pricing.free_tib_per_month")
 
 
 def _baseline_targets(raw) -> dict[str, BaselineTarget]:
@@ -320,14 +332,20 @@ def _req_float(v, key: str) -> float:
     try:
         return float(v)
     except (TypeError, ValueError) as exc:
-        raise ConfigError(f"{key}: expected a number, got {v!r}") from exc
+        raise ConfigError(f"{key}: expected a number, got {v!r}.") from exc
 
 
 def _req_int(v, key: str) -> int:
+    # The isinstance check comes first because `int(3.7)` is 3, quietly. A run
+    # frequency written as 3.7 became 3 and every monthly figure was a fifth too
+    # low with nothing said — while the message below, which exists to catch
+    # exactly this, could only ever fire for a value `int()` refused outright.
+    if isinstance(v, float) and not v.is_integer():
+        raise ConfigError(f"{key}: expected a whole number, got {v!r}.")
     try:
         return int(v)
     except (TypeError, ValueError) as exc:
-        raise ConfigError(f"{key}: expected a whole number, got {v!r}") from exc
+        raise ConfigError(f"{key}: expected a whole number, got {v!r}.") from exc
 
 
 @dataclass(frozen=True)
@@ -545,6 +563,49 @@ CONFIG_REFERENCE: list[ConfigField] = [
         example="- dead-money-thresholds",
     ),
 ]
+
+
+# Type labels in CONFIG_REFERENCE that describe a number, or a map of them.
+_NUMERIC_LABELS = ("float", "int", "map[str->float]", "map[str->int]")
+
+
+def reject_negative(key: str, value: float | None) -> None:
+    """The one lower-bound rule, so every caller words it the same way.
+
+    `key` is whatever the user actually typed — a dotted config key, or a flag
+    name when the value came from the command line.
+    """
+    if value is not None and value < 0:
+        raise ConfigError(f"{key}: must not be negative, got {value}.")
+
+
+def validate_numbers(config: Config) -> None:
+    """No documented numeric setting may be negative.
+
+    Driven off CONFIG_REFERENCE rather than a list of its own, so a numeric key
+    added to the registry is guarded the day it is added. That matters here more
+    than usual: this rule already existed, written out twice, on `pricing.regions`
+    and `pricing.free_tib_per_month` — the two most recently added keys. The ten
+    older ones never got it, and nothing failed to say so.
+
+    The consequence was not cosmetic. A negative `pricing.usd_per_tib` makes
+    every cost negative, so all three money thresholds quietly stop firing: a
+    3 TiB model against a USD 10 ceiling went from FAIL/exit 1 to PASS/exit 0 on
+    one typed minus sign. A negative run frequency does the same to the
+    per-month threshold. Zero stays legal throughout — it means flat-rate slots
+    for a rate, and a declared-but-unavailable allowance for the free tier.
+    """
+    for field_ in CONFIG_REFERENCE:
+        if field_.type_label not in _NUMERIC_LABELS:
+            continue
+        value: Any = config
+        for part in field_.attr.split("."):
+            value = getattr(value, part)
+        if isinstance(value, dict):
+            for name, entry in value.items():
+                reject_negative(f"{field_.key}[{name!r}]", entry)
+        else:
+            reject_negative(field_.key, value)
 
 
 _TEMPLATE_PREAMBLE = """\

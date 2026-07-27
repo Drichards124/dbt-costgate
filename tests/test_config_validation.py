@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeDryRunner, make_manifest, make_node, write_target
-from dbt_costgate.config import CONFIG_REFERENCE, _reject_unknown
+from dbt_costgate.config import _NUMERIC_LABELS, CONFIG_REFERENCE, _reject_unknown
 from dbt_costgate.models import TIB
 from dbt_costgate.policy import EXIT_OPERATIONAL
 
@@ -211,7 +211,7 @@ def test_a_negative_free_tier_allowance_is_refused(tmp_path: Path, capsys):
     err = capsys.readouterr().err
     assert code == EXIT_OPERATIONAL
     assert "pricing.free_tib_per_month" in err
-    assert "must be >= 0" in err
+    assert "must not be negative" in err
 
 
 def test_a_zero_free_tier_allowance_is_a_declaration_not_an_absence(tmp_path: Path, capsys):
@@ -227,3 +227,91 @@ def test_a_zero_free_tier_allowance_is_a_declaration_not_an_absence(tmp_path: Pa
     assert code == 0
     assert "first 0 TiB/month free" in out
     assert "past the 0 TiB/month you declared free" in out
+
+
+# --------------------------------------------------------------------------
+# Numbers that make no sense.
+# --------------------------------------------------------------------------
+#
+# Ten of the twelve numeric inputs used to accept a negative value. The rule was
+# written twice — on `pricing.regions` and `pricing.free_tib_per_month`, the two
+# newest keys — and the older ones never got it, which nothing failed to say.
+# So the cases below are generated from CONFIG_REFERENCE rather than listed: a
+# numeric key added to the registry is covered the day it is added.
+
+_NUMERIC = [f for f in CONFIG_REFERENCE if f.type_label in _NUMERIC_LABELS]
+
+
+def _yaml_for(key: str, value: str) -> str:
+    """A minimal config setting one dotted key, including the map-valued ones."""
+    if key.endswith("regions"):
+        return f"pricing:\n  regions:\n    US: {value}\n"
+    if key.endswith("models"):
+        return f"run_frequency:\n  models:\n    fct_orders: {value}\n"
+    head, _, leaf = key.rpartition(".")
+    return f"{head}:\n  {leaf}: {value}\n" if head else f"{leaf}: {value}\n"
+
+
+@pytest.mark.parametrize("field_", _NUMERIC, ids=lambda f: f.key)
+def test_no_numeric_setting_accepts_a_negative_value(tmp_path: Path, capsys, field_):
+    """A negative number is never what someone meant, and two of these fail open.
+
+    `pricing.usd_per_tib: -6.25` makes every cost negative, so all three money
+    thresholds stop firing while the report still looks ordinary: a 3 TiB model
+    against a USD 10 ceiling went from FAIL/exit 1 to PASS/exit 0 on one typed
+    minus sign. A negative run frequency does the same to the per-month
+    threshold.
+    """
+    code = _run(tmp_path, _yaml_for(field_.key, "-1"))
+    err = capsys.readouterr().err
+    assert code == EXIT_OPERATIONAL, f"{field_.key} accepted -1"
+    assert field_.key in err, f"the message does not name {field_.key}: {err!r}"
+    assert "must not be negative" in err
+
+
+@pytest.mark.parametrize("field_", _NUMERIC, ids=lambda f: f.key)
+def test_every_numeric_setting_still_accepts_zero(tmp_path: Path, field_):
+    """Zero is a real setting, not a near-miss for negative: it means flat-rate
+    slots for a rate, and a declared-but-spent allowance for the free tier. The
+    lower bound has to be inclusive or this fix breaks the config it protects."""
+    assert _run(tmp_path, _yaml_for(field_.key, "0")) != EXIT_OPERATIONAL
+
+
+@pytest.mark.parametrize("key", ["run_frequency.default", "run_frequency.models"])
+def test_a_run_frequency_must_be_a_whole_number(tmp_path: Path, capsys, key):
+    """`int(3.7)` is 3, quietly. A frequency written as 3.7 became 3 and every
+    monthly figure was a fifth too low with nothing said — while the "expected a
+    whole number" message, which exists for exactly this, could only ever fire
+    for something `int()` refused outright."""
+    code = _run(tmp_path, _yaml_for(key, "3.7"))
+    err = capsys.readouterr().err
+    assert code == EXIT_OPERATIONAL
+    assert "expected a whole number" in err
+
+
+def test_a_negative_rate_on_the_command_line_is_refused_too(tmp_path: Path, capsys):
+    """`--usd-per-tib` deliberately bypasses the config merge, so validating only
+    the file would have left the flag as a way around the rule."""
+    code = _run(tmp_path, "", "--usd-per-tib", "-6.25")
+    err = capsys.readouterr().err
+    assert code == EXIT_OPERATIONAL
+    assert "--usd-per-tib" in err, f"the message names the config key, not the flag: {err!r}"
+
+
+def test_a_negative_threshold_on_the_command_line_is_refused_too(tmp_path: Path, capsys):
+    code = _run(tmp_path, "", "--max-usd-total", "-20")
+    assert code == EXIT_OPERATIONAL
+    assert "must not be negative" in capsys.readouterr().err
+
+
+def test_an_unparseable_config_says_what_and_where(tmp_path: Path, capsys):
+    """PyYAML's own text is a four-line block with a caret diagram and its
+    internal name for the input, which flattened into a run-on that buried the
+    line number — the one thing the reader needs."""
+    code = _run(tmp_path, "pricing:\n  - [unclosed\n")
+    err = capsys.readouterr().err
+    assert code == EXIT_OPERATIONAL
+    assert "is not valid YAML" in err
+    assert "line 3" in err, f"no line number in: {err!r}"
+    assert "<unicode string>" not in err, "PyYAML's internal input name leaked to the user"
+    assert err.count("\n") == 1, f"still multi-line: {err!r}"

@@ -24,7 +24,14 @@ from dbt_costgate import (
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
-from dbt_costgate.config import CONFIG_REFERENCE, Config, ConfigError, render_config_template
+from dbt_costgate.config import (
+    CONFIG_REFERENCE,
+    Config,
+    ConfigError,
+    reject_negative,
+    render_config_template,
+    validate_numbers,
+)
 from dbt_costgate.gitdiff import GitDiffError
 from dbt_costgate.models import PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
@@ -390,6 +397,12 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     try:
         config = Config.load(Path(args.config) if args.config else None, project_dir)
         config = _apply_overrides(config, args)
+        # Re-run after the merge, not only inside `load`: a threshold given on the
+        # command line never passes through the file's parser, so validating only
+        # there would leave `--max-usd-total -20` a way around the rule. Named as
+        # the flag rather than the config key, since that is what the user typed.
+        validate_numbers(config)
+        reject_negative("--usd-per-tib", args.usd_per_tib)
     except ConfigError as exc:
         print(f"dbt-costgate: {exc}", file=sys.stderr)
         return policy.EXIT_OPERATIONAL

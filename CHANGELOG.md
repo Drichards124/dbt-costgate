@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [1.0.3] - 2026-07-27
+
+### Fixed
+
+- **A negative number in any setting is now refused, instead of quietly turning
+  the gate off.** `pricing.usd_per_tib: -6.25` — one typed minus sign — made
+  every cost negative, so all three money thresholds stopped firing while the
+  report still looked ordinary. A 3 TiB model against a USD 10 ceiling went from
+  `GATE: FAIL` / exit 1 to `GATE: PASS` / exit 0. A negative `run_frequency` did
+  the same to the per-month threshold.
+
+  Ten of the twelve numeric settings accepted a negative value; only
+  `pricing.regions` and `pricing.free_tib_per_month` refused one. All twelve now
+  do, on the command line as well as in the file:
+
+  ```
+  dbt-costgate: .dbt-costgate.yml: pricing.usd_per_tib: must not be negative, got -6.25.
+  dbt-costgate: --usd-per-tib: must not be negative, got -6.25.
+  ```
+
+  **Zero is unaffected** — it still means flat-rate slots for a rate, and a
+  declared-but-spent allowance for the free tier. If you have a negative value in
+  a config today, the run now stops at exit 2 and names the key rather than
+  reporting a number nobody should act on.
+- **A run frequency written as a fraction is refused rather than silently
+  rounded down.** `run_frequency.default: 3.7` became `3`, so every monthly
+  figure was a fifth too low and nothing said so.
+
+### Changed
+
+- **An unreadable config file now says what is wrong and where.** The message
+  used to carry four lines of parser internals — including a caret diagram and
+  `<unicode string>` — flattened onto one line, which buried the only part worth
+  reading. Now:
+
+  ```
+  dbt-costgate: .dbt-costgate.yml is not valid YAML: expected ',' or ']', but got
+  '<stream end>' (line 3, column 1).
+  ```
+- Config error messages read as sentences: `must not be negative` rather than
+  `must be >= 0`, and the few that were missing a full stop have one.
+
 ## [1.0.2] - 2026-07-27
 
 ### Changed
