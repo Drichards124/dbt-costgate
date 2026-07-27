@@ -375,7 +375,15 @@ answering the question it asks rather than missing one.
 > of the SQL that builds it can tell you. It is a different tool, not a missing
 > feature of this one.
 
-**It does not convert currencies**, model the free tier, or estimate slot cost.
+**It prices SQL models, and a dbt project holds more than those.** Seeds,
+snapshots, tests, analyses, hooks, Python models and ephemeral models get no row.
+Three of those genuinely scan bytes — a snapshot is a `MERGE`, a test is a
+`SELECT` — so "not priced" is not "free", and the tool says so on stderr rather
+than letting a snapshot-only branch look like a branch that changed nothing. The
+full list, and what each one actually costs, is in
+[What dbt-costgate does not price](usage.md#what-dbt-costgate-does-not-price).
+
+**It does not convert currencies**, deduct the free tier, or estimate slot cost.
 
 ---
 
@@ -502,6 +510,35 @@ be resolved at dry-run time, so BigQuery reports a full-table scan.
 > **What to do:** those models are flagged in the report, so you can see which
 > they are. Put heavily-partitioned ones under `warn_only` to keep reporting them
 > without blocking, or `exclude` to drop them from gating entirely.
+
+**A script reads low.** Every other caveat on this page errs high. This one does
+not, which is why it is worth its own entry. If a model's compiled SQL uses
+BigQuery scripting — `DECLARE`, `BEGIN` — its later statements typically filter on
+values that do not exist until the script runs, so BigQuery prices only the part
+it can work out in advance. The row is flagged "multi-statement — dry-run bytes
+may be partial", and *partial* means the real cost is the figure shown **plus an
+unknown amount**.
+
+> **What to do:** treat the number as a floor rather than an estimate. There is no
+> way to make a dry-run resolve a value that does not exist yet, so a gate reading
+> a scripted model is checking a lower bound. If that matters for a particular
+> model, `exclude` it and price it some other way rather than trusting a figure
+> the tool has told you is incomplete.
+
+**A materialized view is priced once; BigQuery bills every refresh.** A dry-run
+of a materialized view's SQL answers "what does it cost to build this once",
+because that is the only question a dry-run can answer. BigQuery then keeps the
+view up to date on its own schedule and bills each of those refreshes, so the
+cost that actually lands on the invoice is a multiple of the row you are reading
+— and dbt-costgate cannot see the schedule, so it cannot say which multiple.
+
+> **What to do:** read the row as the build cost it is; it is flagged, so you will
+> know. `run_frequency` is the wrong tool for it — that multiplies a whole
+> rebuild, whereas BigQuery maintains a materialized view incrementally over
+> whatever changed underneath it, so the product would be wrong in a direction
+> nobody can predict. The figure is still useful for the thing this tool is for:
+> a change that doubles what the view scans to build is a change worth seeing,
+> whatever the refresh cadence turns out to be.
 
 **The free tier is declared, never deducted.** BigQuery's on-demand pricing
 includes the first 1 TiB of query data processed each month free — and that

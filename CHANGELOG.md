@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [Unreleased]
+
+### Changed
+
+- **The line about a resource dbt-costgate does not price no longer says its one
+  fact twice.** It read *"country_codes changed but is not priced — seeds are not
+  priced"*. The first half now says what happened and the second says why:
+
+  ```
+  dbt-costgate: country_codes changed but is not in the report — seeds are not priced.
+  ```
+
+  Same for the `--select` form (*"… was selected but is not in the report — …"*).
+  Grep for `is not priced` still matches; grep for the full old sentence does not.
+  It is also the more accurate wording for an ephemeral model, whose cost really
+  is priced — in the rows of the models that inline it.
+
+### Fixed
+
+- **A changed analysis is now told that "analyses are not priced"**, rather than
+  "analysiss are not priced". The plural was built by adding a letter.
+- **A changed Python model's explanation no longer runs two dashes together.**
+  It was *"… is not priced — Python models are not priced — dbt-costgate
+  estimates SQL scans"*; the second dash is now a semicolon.
+
+### Docs
+
+- **New: [What dbt-costgate does not price](docs/usage.md#what-dbt-costgate-does-not-price).**
+  Seeds, snapshots, tests, analyses, hooks, Python models and ephemeral models
+  get no row in the report, and the tool has always said so on stderr — but no
+  shipped page explained why, or what each one actually costs. The section names
+  all seven and is blunt about the part that matters: **"not priced" is not
+  "free."** A snapshot is a `MERGE` and a test is a `SELECT`; both scan real
+  bytes that dbt-costgate does not put a number on. Ephemeral models are the
+  exception — their cost is counted, in the rows of the models that inline them.
+- **Materialized views and BigQuery scripts are now documented**, in both the
+  usage accuracy notes and the explained-page caveats. Their siblings were
+  already there; these two were not. A materialized view's figure is the cost of
+  building it **once**, and BigQuery bills each automatic refresh on top. A model
+  using `DECLARE` or `BEGIN` reads **low** — the only caveat on the page that
+  errs that way — because BigQuery can only price the statements it can resolve
+  before the script runs.
+
 ## [1.0.1] - 2026-07-27
 
 ### Fixed
