@@ -516,6 +516,54 @@ One case fails whatever your thresholds are: a run where **every** selected mode
 failed to estimate. `PASS` there does not mean the gate checked and found nothing
 wrong; it means the gate never ran.
 
+## What dbt-costgate does not price
+
+The section above is about models it *tried* to measure and could not. This one is
+about the things it never tries: dbt-costgate prices SQL models, and a dbt project
+holds seven other kinds of thing.
+
+The tool never leaves one out silently. When your change touches one, it says so
+on stderr and carries on with the rest of the report:
+
+```
+dbt-costgate: dim_customers_snapshot changed but is not priced — snapshots are not priced.
+```
+
+Naming one in `--select` gets the same line, and the run still exits 0 with the
+report intact — which matters because `dbt ls --select state:modified
+--resource-type model` includes ephemeral models, so an ordinary CI line
+produces this.
+
+**"Not priced" does not mean "free."** Snapshots, tests and hooks all scan real
+BigQuery bytes and land on the same invoice as everything else; dbt-costgate
+simply does not tell you how much.
+
+Named as the tool names them, so the word in the message is the word in the table:
+
+| Kind | What it is | Does it cost anything to run? |
+|---|---|---|
+| **snapshots** | a `MERGE` against a source query | **yes** — it scans, and this tool does not price it |
+| **tests** | a `SELECT` dbt runs to assert something | **yes** — a `unique` test on a wide fact table is a real scan |
+| **operations** | `on-run-start` / `on-run-end` hooks | whatever the SQL inside them does |
+| **Python models** | run on Dataproc Serverless, not on BigQuery | yes, on a different meter entirely |
+| **seeds** | a CSV dbt loads into a table | nothing to dry-run — it is a load, not a query |
+| **analyses** | SQL dbt compiles but never runs | no, unless someone runs it by hand |
+| **ephemeral models** | no table of their own; the SQL is pasted into whatever selects from them | yes — and it **is** counted, in those models' rows |
+
+**Ephemerals are the one with a happy ending.** Because the SQL is inlined, the
+cost genuinely does show up somewhere dbt-costgate looks. Change one and every
+priced model that selects from it gets picked up and labelled — following chains
+of ephemerals down to the first model that has a table of its own. Nothing goes
+missing; it is attributed to the model that pays for it. (Locally the label reads
+*"selected because an ephemeral model it inlines changed"*; with a baseline the
+same models are caught by their compiled SQL differing, and labelled that way.)
+
+For the other six, there is no workaround to offer and inventing one would be
+worse than saying so. What the message buys you is that a snapshot-only branch no
+longer looks identical to a branch that changed nothing — you get told there is a
+`MERGE` in this pull request that nobody priced, and you can decide whether that
+matters.
+
 ## Deleted models
 
 A model in the baseline and gone from the branch is reported as the saving it is:
@@ -801,6 +849,22 @@ worst case. dbt-costgate does not fake it; it flags it.
 - **Dynamic filters** (`CURRENT_DATE()`, subquery predicates) make BigQuery
   dry-runs report a full-table scan. dbt-costgate flags these ("dry-run may be
   worst-case") and lets you `exclude`/`warn_only` heavily-partitioned models.
+- **Scripts read low, not high.** A model whose compiled SQL uses BigQuery
+  scripting (`DECLARE`, `BEGIN`) is flagged "multi-statement — dry-run bytes may
+  be partial". A script's later statements often filter on values that do not
+  exist until it runs, so BigQuery can only price the part it can resolve
+  statically. This is the one warning that points the *opposite* way from the
+  others: dynamic filters over-report, a script under-reports, and a gate reading
+  low is the direction worth knowing about.
+- **A materialized view is priced once; BigQuery bills every refresh.** The figure
+  on the row is what it costs to build the view one time — dbt-costgate dry-runs
+  the SQL, which is all a dry-run can tell you. BigQuery then refreshes it on its
+  own schedule and bills each refresh separately, so the recurring cost is some
+  multiple of what you see, and nothing in a manifest says which. The row is
+  flagged. `run_frequency` is not the fix: it multiplies the build cost, and a
+  refresh is not a rebuild — BigQuery maintains these incrementally over whatever
+  changed in the base tables — so multiplying would be wrong in a direction
+  nobody can predict.
 - **Region-aware pricing.** The applied region, rate, and its source appear in
   every report. Unlisted regions fall back to a disclosed default; override a
   negotiated/editions rate flatly with `pricing.usd_per_tib`, or per region with

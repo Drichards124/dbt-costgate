@@ -105,6 +105,19 @@ def adapter_problem(manifest: dict) -> str | None:
     )
 
 
+# Resource type -> how to say it in a sentence. Spelled out rather than built by
+# appending "s", which told anyone with a changed analysis that "analysiss are
+# not priced" — in a message whose whole job is to sound like the tool knows what
+# it is looking at.
+_UNPRICED_TYPES = {
+    "seed": "seeds",
+    "snapshot": "snapshots",
+    "test": "tests",
+    "analysis": "analyses",
+    "operation": "operations",
+}
+
+
 def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
     """Nodes `model_nodes` drops, mapped to why — name -> reason.
 
@@ -121,8 +134,8 @@ def out_of_scope_nodes(manifest: dict) -> dict[str, str]:
         resource_type = node.get("resource_type")
         config = node.get("config") or {}
         if resource_type != "model":
-            if resource_type in ("seed", "snapshot", "test", "analysis", "operation"):
-                out[name] = f"{resource_type}s are not priced"
+            if resource_type in _UNPRICED_TYPES:
+                out[name] = f"{_UNPRICED_TYPES[resource_type]} are not priced"
         elif node.get("language", "sql") != "sql":
             out[name] = "Python models are not priced — dbt-costgate estimates SQL scans"
         elif config.get("materialized") == "ephemeral":
