@@ -192,13 +192,15 @@ dbt installation, because it builds its manifests by hand.
 Stated plainly, because a verification document that implies more than it
 established is worse than no document.
 
-**A real 429 or 503, retried and recovered.** You cannot make BigQuery
-rate-limit you on demand. What was checked instead is the retry predicate against
-real `TooManyRequests`, `ServiceUnavailable` and `InternalServerError`
-*instances* — it retries all three and refuses `BadRequest`, `NotFound` and
-`Forbidden` — plus the 60-second deadline. That is a strong argument and not an
-observation, and the difference matters: nobody has watched this code recover
-from a transient failure in flight.
+**A real 429 or 503, retried and recovered.** ~~You cannot make BigQuery
+rate-limit you on demand.~~ **Superseded — see
+[retry-path-2026-07-27.md](retry-path-2026-07-27.md).** What was checked here was
+the retry predicate against real exception *instances* plus the 60-second
+deadline, and both passed. Driving the machinery instead of asserting its parts
+showed that neither claim survived contact: the deadline bounded nothing (a
+5-second deadline ran for 179 seconds), and an exhausted transient failure
+reported the wrong kind. Both are fixed, and the difference between asserting a
+component and running it is the whole lesson.
 
 **EU pricing driven by an EU-resident table.** `job.location` round-trips `'EU'`,
 but with no EU dataset available the rate lookup was not driven end to end by a

@@ -41,6 +41,25 @@ def categorize(exc: Exception, self_relation: str | None) -> tuple[ErrorKind, st
     msg = str(exc)
     low = msg.lower()
 
+    # A retry that gives up does not re-raise what failed — google-api-core wraps
+    # it in a RetryError whose message begins "Deadline of 60.0s exceeded while
+    # calling target function, last exception: 503 ...". So every check below
+    # missed: the class is RetryError, and the status code is buried mid-sentence
+    # rather than at the front where `_LEADING_STATUS` looks. Every exhausted
+    # transient failure came back OTHER — "the dry-run failed" — and TRANSIENT,
+    # with its "BigQuery was unavailable and the retries ran out", was unreachable
+    # in production from the moment it was written.
+    #
+    # The unit tests never caught it because they hand this function a bare
+    # `ServiceUnavailable`, which is not what the client raises. Unwrap first: the
+    # cause is the real answer, and it is what a bare-exception test was
+    # approximating all along.
+    if "retryerror" in name:
+        cause = getattr(exc, "cause", None) or exc.__cause__
+        if cause is not None and cause is not exc:
+            return categorize(cause, self_relation)
+        return ErrorKind.TRANSIENT, msg
+
     # The exception class first, its message only as a fallback. The class is
     # what the client library actually determined; the message is prose, and
     # prose contains anything — `400 Column ssn_503 not found in table` is an
@@ -150,7 +169,18 @@ class BigQueryDryRunner:
             dry_run=True, use_query_cache=False, use_legacy_sql=False
         )
         try:
-            job = self._client.query(sql, job_config=job_config, retry=self._retry)
+            # `job_retry=None` is load-bearing, not tidying. `Client.query` takes
+            # two independent retries: `retry` governs the API call, `job_retry`
+            # re-drives the whole job, and it defaults to a 2400-second deadline
+            # that silently outranks ours. Passing only `retry` left a measured
+            # 179 seconds against a 5-second deadline — so `deadline_seconds`
+            # bounded nothing, and during a BigQuery incident every model would
+            # hang for up to forty minutes instead of failing fast.
+            #
+            # None rather than a second Retry object: a dry-run creates no job to
+            # re-drive. It returns statistics inline, so job-level retry has
+            # nothing to retry and was only ever multiplying the API-level one.
+            job = self._client.query(sql, job_config=job_config, retry=self._retry, job_retry=None)
             return DryRunResult(total_bytes=int(job.total_bytes_processed), location=job.location)
         except Exception as exc:
             kind, detail = categorize(exc, self_relation)
