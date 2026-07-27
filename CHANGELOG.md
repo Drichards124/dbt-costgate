@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **You can declare your BigQuery free tier.** `pricing.free_tib_per_month` tells
+  dbt-costgate what your on-demand allowance is, and the report shows where the
+  change lands against it:
+
+  ```yaml
+  pricing:
+    free_tib_per_month: 1
+  run_frequency:
+    default: 30      # required — an allowance is per month, so it needs a month
+  ```
+
+  ```
+  dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table · first 1 TiB/month free
+
+    Net increase: USD 13.19/run · USD 395.63/month
+    Monthly scan for these models: 85.35 TiB — past the 1 TiB/month you declared free
+  ```
+
+  **It subtracts nothing.** No cost figure, threshold, verdict or exit code
+  changes — set it and the gate behaves exactly as it did. The allowance belongs
+  to your whole billing account and is drawn down by every other query anyone
+  runs, which dbt-costgate cannot see, so deducting it would mean assuming it is
+  still unspent. A gate that forgives the first TiB of a regression on an
+  unverified assumption is worse than one that over-reports honestly.
+
+  Three things worth knowing before you set it. *"For these models"* is literal —
+  a pull request covers a handful of models, so the figure is not your project's
+  monthly scan and certainly not your account's. Without a `run_frequency` there
+  is no monthly figure to compare against, and the new
+  `free-tier-needs-run-frequency` notice says so rather than letting the setting
+  sit there doing nothing. And the tier is an on-demand allowance, so all of this
+  is suppressed under capacity/Editions pricing.
+
+  Unset — the default — changes nothing anywhere.
+
+- **`--format json` gains two fields**: `pricing.free_tib_per_month` (what you
+  declared, or `null`) and `net.monthly_scan_bytes` (raw bytes these models are
+  projected to scan in a month, or `null` when no run frequency is set). Unlike
+  the other `net` figures, the monthly total is absolute rather than a difference,
+  so it is present in absolute mode too.
+
+---
+
 A manual QA pass drove the packaged CLI end to end against a real dbt project
 and found 21 defects. This release fixes all of them, and rebuilds the terminal
 report around a readable table.

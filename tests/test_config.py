@@ -137,6 +137,7 @@ pricing:
   region: europe-west3
   usd_per_tib: 5.0
   currency: EUR
+  free_tib_per_month: 1
   regions:
     US: 6.0
 thresholds:

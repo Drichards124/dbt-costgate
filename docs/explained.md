@@ -317,6 +317,7 @@ you uncomment something.
 | `pricing.usd_per_tib` | `float` | _none_ | Flat on-demand rate override (USD/TiB) for every region. Default: the built-in per-region rate table. |
 | `pricing.currency` | `str` | _none_ | ISO 4217 code the reported amounts are labelled with, e.g. EUR. Default: USD, matching the built-in table. This labels a rate you supplied yourself — dbt-costgate never converts between currencies — so any region still priced from the built-in table is an error, not a conversion. |
 | `pricing.regions` | `map[str->float]` | _empty_ | Per-region rate overrides (region -> USD/TiB) that patch the built-in table. Keys match case-insensitively; 0 is allowed. Unlisted regions use the table. |
+| `pricing.free_tib_per_month` | `float` | _none_ | TiB/month you treat as free, e.g. 1 for BigQuery's on-demand tier. Reported, never deducted: the report shows this change's projected monthly scan against the allowance, and no cost figure, threshold or verdict changes. The allowance belongs to the whole billing account and is drawn down by every other query on it, which dbt-costgate cannot see, so subtracting it would be a guess a gate should not make. Needs run_frequency to have a monthly figure to compare. Default: unset, which reports the tier without a figure. |
 | `thresholds.max_usd_increase_per_run` | `float` | _none_ | Gate fails if a model's per-run cost increase exceeds this many USD. |
 | `thresholds.max_pct_increase` | `float` | _none_ | Gate fails if a model's cost increases by more than this percent. |
 | `thresholds.max_usd_increase_per_month` | `float` | _none_ | Gate fails if a model's projected monthly cost increase exceeds this many USD. |
@@ -502,22 +503,44 @@ be resolved at dry-run time, so BigQuery reports a full-table scan.
 > they are. Put heavily-partitioned ones under `warn_only` to keep reporting them
 > without blocking, or `exclude` to drop them from gating entirely.
 
-**The free tier is disclosed, never deducted.** BigQuery's on-demand pricing
+**The free tier is declared, never deducted.** BigQuery's on-demand pricing
 includes the first 1 TiB of query data processed each month free — and that
 allowance belongs to the whole **billing account**, not to your dbt project. Every
 other query anyone runs that month draws it down. A dry-run reports bytes for one
 statement and says nothing about the account's month to date, so dbt-costgate
 prices from the first byte and states so in the footer of every priced report.
 
-> **What to do:** nothing available, and the bias is deliberate — over-reporting
-> a small change is safer for a gate than under-reporting one. It matters least
-> where it matters most: on any change big enough to be worth blocking, one free
-> TiB is noise. There is deliberately no setting to switch it on: it could only
-> ever mean "assume the tier is still unspent", which is a claim about the entire
-> billing account that the tool has no way to check, and a gate that quietly
-> forgives the first TiB of a regression because of an unverified assumption is
-> worse than one that over-reports honestly. Note the tier is an on-demand
-> allowance and does not apply under capacity/Editions pricing at all.
+> **What to do:** you can *declare* your allowance, and the report will tell you
+> where the change sits relative to it:
+>
+> ```yaml
+> pricing:
+>   free_tib_per_month: 1
+> run_frequency:
+>   default: 30      # needed — an allowance is per month, so it needs a month
+> ```
+>
+> ```
+> Net increase: USD 13.19/run · USD 395.63/month
+> Monthly scan for these models: 85.35 TiB — past the 1 TiB/month you declared free
+> ```
+>
+> Nothing is subtracted, and that is the point. Deducting could only ever mean
+> "assume the tier is still unspent", which is a claim about the entire billing
+> account that the tool has no way to check — and a gate that quietly forgives the
+> first TiB of a regression on an unverified assumption is worse than one that
+> over-reports honestly. So no cost figure, threshold, verdict or exit code moves;
+> the report just stops making you keep the number in your head.
+>
+> Two things to read carefully. **"For these models"** is literal: a pull request
+> touches a handful of models, so that total is not your project's monthly scan
+> and certainly not your account's. And the tier is an **on-demand** allowance, so
+> the whole thing is suppressed under capacity/Editions pricing.
+>
+> The bias in the underlying figures is deliberate and unchanged: over-reporting a
+> small change is safer for a gate than under-reporting one, and it matters least
+> where it matters most — on any change big enough to be worth blocking, one free
+> TiB is noise.
 
 **Config changes with identical compiled SQL are invisible.** Changing
 `partition_by` or `cluster_by` may not change *this* model's compiled SQL at all.

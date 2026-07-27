@@ -22,6 +22,23 @@ def _new_model(name="dim_new"):
     )
 
 
+def _priced_model(name="fct", runs=None):
+    """A row with a real before and after, so it survives `estimated`."""
+    return CostDelta(
+        name=name,
+        unique_id=f"model.pkg.{name}",
+        is_incremental=False,
+        is_new=False,
+        gateable=True,
+        bytes_baseline=1024,
+        bytes_current=2048,
+        usd_baseline=0.01,
+        usd_current=0.02,
+        region="US",
+        runs_per_month=runs,
+    )
+
+
 def _disclosure(rate=0.0, source="user-override", region="US"):
     return PricingDisclosure(
         regions={region: rate},
@@ -43,6 +60,7 @@ def test_ids_are_unique_and_every_check_is_reachable():
         "dead-money-thresholds",
         "unverified-region-rate",
         "new-models-not-percentage-gated",
+        "free-tier-needs-run-frequency",
     }
 
 
@@ -105,9 +123,48 @@ def test_every_notice_ends_by_naming_its_own_silencing_id():
             _disclosure(rate=6.25, source="region-table"),
             [_new_model()],
         ),
+        (
+            _config(free_tib_per_month=1.0),
+            _disclosure(rate=6.25, source="region-table"),
+            [_priced_model()],
+        ),
     ]
     produced = [n for config, d, deltas in cases for n in notices.collect(config, table, d, deltas)]
     assert {n.id for n in produced} == set(notices.NOTICE_IDS)  # every check exercised
     for n in produced:
         assert n.message.endswith(f"Silence it with notices.silence: [{n.id}].")
         assert "does not affect the gate or the exit code" in n.message
+
+
+def test_the_free_tier_notice_fires_only_when_a_month_cannot_be_worked_out():
+    """The allowance is per month, so it needs a monthly total, which needs a run
+    frequency for every model. Keyed on the computed result rather than on
+    `run_frequency` being absent — a default that leaves one model uncovered
+    fails the same way and would otherwise slip through."""
+    table = PricingTable.load()
+    d = _disclosure(rate=6.25, source="region-table")
+
+    def ids(config, deltas):
+        return [n.id for n in notices.collect(config, table, d, deltas)]
+
+    declared = _config(free_tib_per_month=1.0)
+    assert ids(declared, [_priced_model()]) == ["free-tier-needs-run-frequency"]
+    assert ids(declared, [_priced_model(runs=30)]) == []
+    # One model covered, one not: the total is still unknowable.
+    assert ids(declared, [_priced_model("a", runs=30), _priced_model("b")]) == [
+        "free-tier-needs-run-frequency"
+    ]
+    # Undeclared is the default and says nothing at all.
+    assert ids(_config(), [_priced_model()]) == []
+
+
+def test_the_free_tier_notice_stays_quiet_when_nothing_was_estimated():
+    """A run with no estimated models produces the same `None` monthly total, but
+    the fix is not a run frequency and the run already has nothing to say."""
+    got = notices.collect(
+        _config(free_tib_per_month=1.0),
+        PricingTable.load(),
+        _disclosure(rate=6.25, source="region-table"),
+        [],
+    )
+    assert got == []

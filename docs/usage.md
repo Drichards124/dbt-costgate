@@ -387,6 +387,24 @@ thresholds:
   max_tib_total: 3.00      # gates a new model too
 ```
 
+**A setting that needs a second one: `free-tier-needs-run-frequency`.**
+`pricing.free_tib_per_month` declares an allowance *per month*, so it needs a
+monthly figure to be shown against — which needs to know how often these models
+run. Set it without a `run_frequency` and the allowance appears in the header and
+then does nothing else, which is the same shape as a dollar threshold under slot
+pricing. The notice names the fix:
+
+```yaml
+pricing:
+  free_tib_per_month: 1
+run_frequency:
+  default: 30              # or a models: entry for each model in the change
+```
+
+It fires on the outcome, not on the setting, so a `run_frequency.default` that
+leaves one model uncovered is caught too — a total that silently omits a model
+would understate, and understating is the one direction this tool does not go.
+
 **On a location the bundled table doesn't know** — a region Google opened after
 the table was last verified. dbt-costgate falls back to a default rate rather
 than refusing to price, and tells you which way that guess errs:
@@ -788,15 +806,35 @@ worst case. dbt-costgate does not fake it; it flags it.
   negotiated/editions rate flatly with `pricing.usd_per_tib`, or per region with
   `pricing.regions` (see below). When a report spans regions with different
   sources, each region is tagged (`override` / `table` / `fallback`).
-- **The free tier is disclosed, never deducted**, in the footer of every priced
-  report rather than only here. The 1 TiB/month on-demand allowance belongs to
-  the **billing account** and is drawn down by every other query anyone runs that
-  month, which a dry-run cannot see — so figures are priced from the first byte
-  and read high by up to one TiB's worth. Not configurable, by design: a setting
-  could only mean "assume the tier is still unspent", and a gate that forgives
-  the first TiB of a regression on an unverified assumption is worse than one
-  that over-reports honestly. The tier is an on-demand allowance and does not
-  apply under capacity/Editions pricing at all.
+- **The free tier is declared, never deducted**, and the footer of every priced
+  report says which. The 1 TiB/month on-demand allowance belongs to the **billing
+  account** and is drawn down by every other query anyone runs that month, which
+  a dry-run cannot see — so figures are priced from the first byte and read high
+  by up to one TiB's worth.
+
+  Declare yours and the report tells you where the change lands relative to it:
+
+  ```yaml
+  pricing:
+    free_tib_per_month: 1
+  run_frequency:
+    default: 30      # required — an allowance is per month, so it needs a month
+  ```
+
+  ```
+  Net increase: USD 13.19/run · USD 395.63/month
+  Monthly scan for these models: 85.35 TiB — past the 1 TiB/month you declared free
+  ```
+
+  **It subtracts nothing.** No cost figure, threshold, verdict or exit code
+  changes, because deducting could only mean "assume the tier is still unspent"
+  and a gate that forgives the first TiB of a regression on an unverified
+  assumption is worse than one that over-reports honestly. "For these models" is
+  literal — a pull request covers a handful of them, so the total is not your
+  project's monthly scan, let alone your account's. Without a `run_frequency`
+  there is no monthly figure to compare against, and the
+  `free-tier-needs-run-frequency` notice says so. The tier is an on-demand
+  allowance and the whole thing is suppressed under capacity/Editions pricing.
 - **Capacity / Editions (slot) pricing.** Slot cost cannot be estimated before a
   query runs — a dry-run reports bytes, never slot time, and slot consumption only
   exists once a job has executed. So under slots, bytes scanned is a *work* signal,
@@ -868,6 +906,15 @@ pricing:
   # regions:
   #   europe-west3: 4.80
   #   US: 6.00
+
+  # TiB/month you treat as free, e.g. 1 for BigQuery's on-demand tier. Reported,
+  # never deducted: the report shows this change's projected monthly scan
+  # against the allowance, and no cost figure, threshold or verdict changes. The
+  # allowance belongs to the whole billing account and is drawn down by every
+  # other query on it, which dbt-costgate cannot see, so subtracting it would be
+  # a guess a gate should not make. Needs run_frequency to have a monthly figure
+  # to compare. Default: unset, which reports the tier without a figure.
+  # free_tib_per_month: 1
 
 thresholds:
   # Gate fails if a model's per-run cost increase exceeds this many USD.
