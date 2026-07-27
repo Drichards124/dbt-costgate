@@ -28,7 +28,9 @@ infrastructure, it tells a reader nothing they need, and this file is public.
 
 ## What it found
 
-One defect, and it is the kind only a real warehouse produces.
+Two defects, both of the kind only real numbers produce.
+
+### 1. A 403 is not always a permissions problem
 
 **BigQuery answers 403 — not 404 — for a dataset or project that does not
 exist.** It does this deliberately, so nobody can map an account by watching 404s
@@ -53,6 +55,37 @@ BigQuery will not disambiguate it. What was wrong was the two sentences built on
 top of it, both now naming the other cause:
 [models.py](../../src/dbt_costgate/models.py) and
 [cli.py](../../src/dbt_costgate/cli.py). Two tests pin it.
+
+### 2. A breach message that compared a number to itself
+
+Setting an absolute ceiling on a real, modestly-sized model produced this:
+
+```
+- fct_names: 0.00 TiB/run exceeds cap 0.00 TiB
+- fct_names: USD 0.00/run exceeds cap USD 0.00
+```
+
+Both sides rendered at two decimal places. The gate was right and the exit code
+was right; the sentence explaining them said nothing. This only shows up with
+small numbers, which is exactly what a warehouse full of ordinary models
+produces — `max_tib_total: 0.001` is a 1 GiB ceiling, an unremarkable thing to
+set, and it rounds to zero in TiB. On-demand BigQuery is a few dollars a TiB, so
+a hundred-megabyte model costs a fraction of a penny and the dollar cap collapses
+the same way.
+
+**This bug already had a fix elsewhere.** `format_pct` carries a comment about
+being written to stop `+0% exceeds 0%` — a real 0.4% increase over a 0.3% limit.
+Same defect, same remedy, but money and bytes were never given the same
+treatment. Now they are: byte figures go through the `humanize_bytes` the table
+already uses (so `147.61 MiB/run exceeds cap 104.86 MiB`), and money widens its
+decimals only when two places would round an amount away to nothing
+(`USD 0.0009/run exceeds cap USD 0.0001`). Ordinary caps are untouched.
+
+`humanize_bytes` moved to [models.py](../../src/dbt_costgate/models.py) to make
+that possible — beside `format_money` and `format_pct`, for the reason the
+comment on `format_money` already gives: the report and the breach messages
+render the same quantities and have to agree. `policy.py` hand-formatting its own
+`{tib:,.2f}` was the drift that comment warns about.
 
 ## What passed
 
@@ -127,6 +160,32 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table · first
 - Exit code 1, `GATE: FAIL`.
 
 **18 of 18 checks passed** after the 403 wording fix.
+
+## The whole command surface
+
+`scripts/verify_live.py` drives one shape of one subcommand. That is not the same
+as "the CLI works against BigQuery", so the rest was run by hand against a real
+dbt project — four models compiled by **dbt-bigquery 1.12.0**, three of them
+reading `bigquery-public-data.usa_names` and one deliberately referencing a table
+that does not exist.
+
+| Path | Result |
+|---|---|
+| `check --against main` | the baseline auto-compiled in the isolated worktree with a real BigQuery adapter, both sides dry-run, +597% — the first time this path has ever run with a BigQuery compile rather than duckdb |
+| 4 models, `--threads 4` | genuinely parallel dry-runs; per-model bytes correct |
+| mixed success and failure | the broken reference reported as `UPSTREAM_MISSING` under NOTES, exit 0 — correct, since that kind is not operational and the other three were estimated |
+| `--format terminal` | aligned table, notes, footer |
+| `--format markdown` | the sticky-PR-comment path CI actually posts |
+| `--format json` | strict parse, no `Infinity`/`NaN`, and `net` correctly all-`null` when one model of four could not be estimated |
+| `--output FILE` | written |
+| `--region`, `--usd-per-tib` | override reaches the header and the rate |
+| absolute caps | gate on real numbers — this is where defect 2 surfaced |
+| `config`, `init` | neither touches BigQuery; the `init` template still parses to exactly `Config()` |
+
+The dbt project, its `profiles.yml` and the dbt-bigquery install were all
+throwaway, outside the repository, and are not committed. The committed harness
+imports nothing but the standard library and dbt-costgate itself — it needs no
+dbt installation, because it builds its manifests by hand.
 
 ## What this run could not prove
 

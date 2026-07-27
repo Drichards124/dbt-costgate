@@ -23,6 +23,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Check the names in your `--select` and your model SQL before reaching for IAM.
 
+- **`max_tib_total` and `max_usd_total` breaches now name numbers you can tell
+  apart.** Both sides were rendered at two decimal places, so a small cap
+  produced a breach line that compared a number to itself:
+
+  ```
+  - fct_names: 0.00 TiB/run exceeds cap 0.00 TiB
+  - fct_names: USD 0.00/run exceeds cap USD 0.00
+  ```
+
+  A 1 GiB ceiling (`max_tib_total: 0.001`) is an ordinary thing to set and lands
+  right in that range. Byte figures now use the same units as the table, and
+  money widens its decimals only when two places would round an amount away:
+
+  ```
+  - fct_names: 147.61 MiB/run exceeds cap 104.86 MiB
+  - fct_names: USD 0.0009/run exceeds cap USD 0.0001
+  ```
+
+  Ordinary caps are unchanged — `USD 0.84/run exceeds cap USD 0.50` still reads
+  at two places. Only the wording moved; gating, exit codes and verdicts are
+  identical.
+
 ## [0.11.0] - 2026-07-26
 
 ### Added
