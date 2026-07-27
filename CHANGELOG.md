@@ -11,6 +11,26 @@ including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
 ### Fixed
 
+- **`--select` no longer throws away the whole report because one name cannot be
+  priced.** Naming a seed, a snapshot or an ephemeral model alongside real models
+  used to end the run at exit 2 with nothing printed — even when sixteen other
+  models had answers. That is reachable from an ordinary CI line, because
+  `dbt ls --select state:modified --resource-type model` includes ephemerals.
+
+  Those names are now reported on stderr and the run carries on, which is what
+  the change-detection path has always done:
+
+  ```
+  dbt-costgate: int_names_00 was selected but is not priced — ephemeral models
+    have no relation of their own; their SQL is inlined into the models that
+    select from them, and the cost shows up there.
+  ```
+
+  **Two things deliberately did not change.** A `--select` naming *only* unpriced
+  nodes is still exit 2 — nothing was gated, and that has to stay loud. A name
+  nobody recognises is still exit 2 with a spelling suggestion, so a stale list
+  cannot quietly check nothing.
+
 - **A BigQuery outage no longer hangs your CI job for up to forty minutes per
   model.** `deadline_seconds` (default 60) was bounding nothing. `Client.query`
   takes two independent retries and dbt-costgate set only one, leaving
