@@ -81,8 +81,8 @@ Free tier (1 TiB/month, per billing account) is declared, never deducted:
 shows this change's projected monthly scan against it, but nothing is subtracted
 from any figure the gate reads. Consumption is account-wide and invisible from a
 dry-run, so subtracting would mean guessing, and guessing low is the wrong
-direction for a gate (ADR-0015). Editions/slot pricing: bytes is a documented
-proxy, not an invoice prediction.
+direction for a gate. Editions/slot pricing: bytes is a documented proxy, not an
+invoice prediction.
 
 ## Known hard edges (design drivers)
 

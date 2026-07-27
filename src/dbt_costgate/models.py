@@ -464,8 +464,10 @@ class PricingDisclosure:
     #
     # Declared, never deducted: BigQuery's allowance belongs to the whole billing
     # account and is drawn down by every query anyone runs, which a dry-run
-    # cannot see. So this changes what a report *says* and never what the gate
-    # reads — see ADR-0015.
+    # cannot see. Subtracting it could only mean assuming it is still unspent,
+    # and a gate that forgives the first TiB of a regression on an unverified
+    # assumption is worse than one that over-reports. So this changes what a
+    # report *says* and never what the gate reads.
     free_tib_per_month: float | None = None
 
     @property

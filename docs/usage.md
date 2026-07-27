@@ -835,7 +835,6 @@ worst case. dbt-costgate does not fake it; it flags it.
   there is no monthly figure to compare against, and the
   `free-tier-needs-run-frequency` notice says so. The tier is an on-demand
   allowance and the whole thing is suppressed under capacity/Editions pricing.
-  See [ADR-0015](decisions/0015-free-tier-declared-not-deducted.md).
 - **Capacity / Editions (slot) pricing.** Slot cost cannot be estimated before a
   query runs — a dry-run reports bytes, never slot time, and slot consumption only
   exists once a job has executed. So under slots, bytes scanned is a *work* signal,

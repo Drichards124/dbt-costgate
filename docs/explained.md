@@ -540,7 +540,7 @@ prices from the first byte and states so in the footer of every priced report.
 > The bias in the underlying figures is deliberate and unchanged: over-reporting a
 > small change is safer for a gate than under-reporting one, and it matters least
 > where it matters most — on any change big enough to be worth blocking, one free
-> TiB is noise. See [ADR-0015](decisions/0015-free-tier-declared-not-deducted.md).
+> TiB is noise.
 
 **Config changes with identical compiled SQL are invisible.** Changing
 `partition_by` or `cluster_by` may not change *this* model's compiled SQL at all.
