@@ -3,7 +3,8 @@ import json
 
 import pytest
 
-from dbt_costgate import report
+from dbt_costgate import policy, report
+from dbt_costgate.config import Config, Thresholds
 from dbt_costgate.models import (
     BASIS_LABELS,
     CostDelta,
@@ -1031,8 +1032,20 @@ HOSTILE_NAMES = {
 
 
 def _hostile(name: str):
-    rep = _net_report([_delta(name, _TIB, 3 * _TIB)], status=Status.FAIL)
-    rep.verdict.breaches = [f"{name}: +200% exceeds 25%"]
+    """The verdict is built by `policy.evaluate`, not hand-written here.
+
+    It was hand-written, with the raw name spliced straight into the breach
+    string — so the fixture produced something production cannot, and the
+    control-character test below had to carve the whole breach section out of
+    its assertion to pass. That is a test shaped around its own fixture, which
+    is the exact failure this file exists to catch.
+
+    Going through `policy` covers the sanitising it does, and lets the assertion
+    read the entire report instead of the part that happened to be clean.
+    """
+    delta = _delta(name, _TIB, 3 * _TIB)
+    rep = _net_report([delta], status=Status.FAIL)
+    rep.verdict = policy.evaluate([delta], Config(thresholds=Thresholds(max_pct_increase=25)))
     return rep
 
 
@@ -1064,8 +1077,9 @@ def test_a_hostile_model_name_cannot_break_out_of_the_markdown_table(name: str):
 @pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
 def test_a_hostile_model_name_never_reaches_the_terminal_as_a_control_code(name: str):
     out = report.render_terminal(_hostile(name))
-    body = out.split("GATE:")[0]
-    leaked = [c for c in body if ord(c) < 0x20 and c != "\n"]
+    # The whole report, breach messages included. Those quote the model name too,
+    # and an earlier version of this test excluded them.
+    leaked = [c for c in out if ord(c) < 0x20 and c != "\n"]
     assert not leaked, f"control characters reached the terminal: {[hex(ord(c)) for c in leaked]}"
 
 
