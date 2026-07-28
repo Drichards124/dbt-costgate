@@ -933,3 +933,160 @@ def test_capping_the_comment_does_not_touch_the_json():
     it carries every model however many there are."""
     payload = json.loads(report.render_json(_many(1_000)))
     assert len(payload["models"]) == 1_000
+
+
+# --- a report spanning regions with different rates --------------------------
+#
+# The header names every region it covers and used to state a single rate beside
+# them — whichever region happened to come first. The built-in table spans 1.8x
+# (US 6.25 to southamerica-east1 11.25), so the most prominent line in the report
+# could understate by nearly half while the footer, three lines down, had it
+# right all along.
+#
+# Found by pricing real queries in EU and asia-northeast1 rather than by reading
+# the code: EU is 6.25, identical to the US default, so an EU-only check cannot
+# tell a working region lookup from a broken one. asia-northeast1 at 7.50 can.
+
+_REAL_RATES = {"US": 6.25, "EU": 6.25, "asia-northeast1": 7.50}
+
+
+def _regional(rates: dict[str, float]):
+    rep = _net_report([_delta("m", _TIB, 3 * _TIB)])
+    rep.disclosure.regions = dict(rates)
+    rep.disclosure.region_sources = {r: "region-table" for r in rates}
+    return rep
+
+
+def test_the_header_gives_a_range_when_regions_are_priced_differently():
+    out = report.render_terminal(_regional(_REAL_RATES))
+    header = out.splitlines()[0]
+    assert "USD 6.25–7.50/TiB" in header, header
+    # The bug it replaces: one region's rate presented as the rate for all of
+    # them, next to a list naming every region.
+    assert "on-demand USD 6.25/TiB" not in header
+
+
+def test_the_header_states_one_rate_when_every_region_agrees():
+    """A range where there is no range would be noise on the common case."""
+    out = report.render_terminal(_regional({"US": 6.25, "EU": 6.25}))
+    assert "on-demand USD 6.25/TiB" in out.splitlines()[0]
+
+
+def test_the_header_range_covers_the_extremes_not_the_first_two():
+    out = report.render_terminal(
+        _regional({"europe-west3": 4.80, "US": 6.25, "southamerica-east1": 11.25})
+    )
+    assert "USD 4.80–11.25/TiB" in out.splitlines()[0]
+
+
+def test_the_header_and_the_footer_never_disagree_about_the_rates():
+    """The footer always broke this out per region; only the summary claimed a
+    single number. Whatever the header says has to be true of the footer."""
+    out = report.render_terminal(_regional(_REAL_RATES))
+    footer = next(line for line in out.splitlines() if "Pricing:" in line)
+    for rate in ("6.25", "7.50"):
+        assert rate in footer
+    assert "11.25" not in out
+
+
+# --- names the tool did not choose -------------------------------------------
+#
+# A model name comes from a manifest dbt wrote from a filename, and it reaches a
+# terminal and a public pull-request comment unaltered. POSIX allows every
+# character below in a filename except the null byte and the slash, so none of
+# this is theoretical.
+#
+# Found by fuzzing rather than by review, and the terminal was as broken as the
+# markdown: a newline split the row in half in both, a pipe spilled extra cells
+# across a markdown table and shifted every figure after it into the wrong
+# column, and an escape character passed straight through to the terminal so a
+# model name could recolour everything printed after it.
+#
+# Asserted on the rendered output rather than on the call sites, deliberately.
+# The name reaches the reader through eight different lines — table cell, breach
+# messages, caveats, errors, in two renderers — and a test that checked the sites
+# would pass while missing the one nobody remembered.
+
+HOSTILE_NAMES = {
+    "pipe": "fct|orders|--:|",
+    "newline": "fct\norders",
+    "carriage return": "fct\rorders",
+    "tab": "fct\torders",
+    "null byte": "fct\x00orders",
+    "escape": "fct\x1b[31morders",
+    "bell": "fct\aorders",
+    "delete": "fct\x7forders",
+    "c1 control": "fct\x9borders",
+    "markdown bold": "**fct_orders**",
+    "html": "<script>alert(1)</script>",
+    "rtl override": "fct‮orders",
+    "zero width": "fct​orders",
+    "cjk wide": "モデル名前テスト",
+    "emoji": "fct_orders_💸🔥",
+    "combining": "fct_ordérs",
+    "very long": "f" * 500,
+    "empty": "",
+    "spaces only": "   ",
+}
+
+
+def _hostile(name: str):
+    rep = _net_report([_delta(name, _TIB, 3 * _TIB)], status=Status.FAIL)
+    rep.verdict.breaches = [f"{name}: +200% exceeds 25%"]
+    return rep
+
+
+@pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
+@pytest.mark.parametrize("fmt", ["terminal", "markdown", "json"])
+def test_a_hostile_model_name_renders_without_raising(name: str, fmt: str):
+    assert report.render(_hostile(name), fmt) is not None
+
+
+@pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
+def test_a_hostile_model_name_keeps_the_json_parseable(name: str):
+    payload = json.loads(report.render_json(_hostile(name)))
+    assert len(payload["models"]) == 1
+    # The stored name is the identity `exclude` and `renames` match on, so it is
+    # reported exactly as it is rather than cleaned up.
+    assert payload["models"][0]["name"] == name
+
+
+@pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
+def test_a_hostile_model_name_cannot_break_out_of_the_markdown_table(name: str):
+    out = report.render_markdown(_hostile(name))
+    rows = [ln for ln in out.splitlines() if ln.startswith("| `")]
+    assert len(rows) == 1, f"the row did not stay one line: {rows}"
+    # Six columns in the priced diff table, so seven separators. An unescaped
+    # pipe in the name adds cells and silently shifts every figure right.
+    assert rows[0].count("|") - rows[0].count(r"\|") == 7, rows[0]
+
+
+@pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
+def test_a_hostile_model_name_never_reaches_the_terminal_as_a_control_code(name: str):
+    out = report.render_terminal(_hostile(name))
+    body = out.split("GATE:")[0]
+    leaked = [c for c in body if ord(c) < 0x20 and c != "\n"]
+    assert not leaked, f"control characters reached the terminal: {[hex(ord(c)) for c in leaked]}"
+
+
+@pytest.mark.parametrize("name", HOSTILE_NAMES.values(), ids=HOSTILE_NAMES.keys())
+def test_a_hostile_model_name_cannot_split_a_terminal_row(name: str):
+    """A newline in a name broke the table's alignment, which is the whole point
+    of having a table.
+
+    The dropped-column notice is excluded rather than counted: a 500-character
+    name genuinely does squeeze a column out at the default width, and saying so
+    is the layout behaving as designed, not the row splitting.
+    """
+    out = report.render_terminal(_hostile(name))
+    lines = out.splitlines()
+    rule = next(i for i, ln in enumerate(lines) if "─" in ln)
+    # Exactly one row between the rule and the blank line that ends the table.
+    body = []
+    for ln in lines[rule + 1 :]:
+        if not ln.strip():
+            break
+        if "hidden — widen the terminal" in ln:
+            continue
+        body.append(ln)
+    assert len(body) == 1, f"one model rendered {len(body)} rows: {body}"

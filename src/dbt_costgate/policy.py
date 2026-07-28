@@ -14,6 +14,7 @@ from dbt_costgate.models import (
     CostDelta,
     Status,
     Verdict,
+    display_name,
     format_money,
     format_money_pair,
     format_pct,
@@ -60,7 +61,8 @@ def evaluate(deltas: list[CostDelta], config: Config, currency: str = "USD") -> 
         # With no thresholds configured the run is informational — a zero-setup
         # local look — and failing it would answer a question nobody asked.
         breaches.extend(
-            f"{d.name}: not checked — {SKIP_REASON_MESSAGES[d.skip_reason]}" for d in unchecked
+            f"{display_name(d.name)}: not checked — {SKIP_REASON_MESSAGES[d.skip_reason]}"
+            for d in unchecked
         )
 
     for d in deltas:
@@ -122,7 +124,7 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
     if thr.max_usd_increase_per_run is not None and run_delta is not None:
         if run_delta > thr.max_usd_increase_per_run:
             out.append(
-                f"{d.name}: {format_money(run_delta, cur, signed=True)}/run exceeds "
+                f"{display_name(d.name)}: {format_money(run_delta, cur, signed=True)}/run exceeds "
                 f"{format_money(thr.max_usd_increase_per_run, cur)}"
             )
     if thr.max_pct_increase is not None:
@@ -131,26 +133,28 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
             # comparison below can never fire — which left the percentage gate
             # switched off for the one model it should catch hardest.
             out.append(
-                f"{d.name}: grew from a baseline that scanned nothing, which is past any "
-                f"percentage limit ({format_pct(thr.max_pct_increase, signed=False)})"
+                f"{display_name(d.name)}: grew from a baseline that scanned nothing, "
+                f"which is past any percentage limit "
+                f"({format_pct(thr.max_pct_increase, signed=False)})"
             )
         elif d.pct_delta is not None and d.pct_delta > thr.max_pct_increase:
             out.append(
-                f"{d.name}: {format_pct(d.pct_delta)} exceeds "
+                f"{display_name(d.name)}: {format_pct(d.pct_delta)} exceeds "
                 f"{format_pct(thr.max_pct_increase, signed=False)}"
             )
     month_delta = d.usd_per_month_delta
     if thr.max_usd_increase_per_month is not None and month_delta is not None:
         if month_delta > thr.max_usd_increase_per_month:
             out.append(
-                f"{d.name}: {format_money(month_delta, cur, signed=True)}/month exceeds "
+                f"{display_name(d.name)}: "
+                f"{format_money(month_delta, cur, signed=True)}/month exceeds "
                 f"{format_money(thr.max_usd_increase_per_month, cur)}"
             )
     # Absolute ceilings: gate the total per-run cost/scan, not the increase.
     if thr.max_usd_total is not None and d.usd_current is not None:
         if d.usd_current > thr.max_usd_total:
             spent, cap = format_money_pair(d.usd_current, thr.max_usd_total, cur)
-            out.append(f"{d.name}: {spent}/run exceeds cap {cap}")
+            out.append(f"{display_name(d.name)}: {spent}/run exceeds cap {cap}")
     if thr.max_tib_total is not None and d.bytes_current is not None:
         if d.bytes_current / TIB > thr.max_tib_total:
             # Both sides through the same humanizer the table uses. The cap is
@@ -159,5 +163,5 @@ def _breaches_for(d: CostDelta, thr: Thresholds, currency: str = "USD") -> list[
             # sentence, and `0.00 TiB` next to `0.00 TiB` compares nothing.
             scanned = humanize_bytes(d.bytes_current)
             ceiling = humanize_bytes(int(thr.max_tib_total * TIB))
-            out.append(f"{d.name}: {scanned}/run exceeds cap {ceiling}")
+            out.append(f"{display_name(d.name)}: {scanned}/run exceeds cap {ceiling}")
     return out
