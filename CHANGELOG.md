@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [1.0.4] - 2026-07-27
+
+### Fixed
+
+- **A very large change no longer produces a pull-request comment with no verdict
+  in it.** GitHub rejects a comment over 65,536 characters, so dbt-costgate cuts
+  an oversized one to fit — from the end, which is where the verdict used to sit.
+  Measured on a change where every model breached: past about **935 models** the
+  comment was a wall of cost rows, `_…report truncated._`, and no `PASS` or
+  `FAIL` anywhere in it. The exit code was still right and CI still blocked; the
+  part a person reads had lost its conclusion.
+
+  The comment now leads with the verdict, and no list in it grows without limit.
+
+### Changed
+
+- **The pull-request comment reads summary first, evidence after.** The verdict
+  and the net figure come above the table rather than below it:
+
+  ```
+  ### 💸 dbt-costgate — cost impact of this change (2 models)
+
+  ❌ **Gate: FAIL**
+  - fct_orders_daily: USD +13.19/run exceeds USD 5.00
+
+  **Net increase:** USD 13.19/run · USD 395.70/month
+
+  | Model | Baseline | This change | … |
+  ```
+- **A change touching more than 50 models shows the 50 largest and says how many
+  it left out** — `…and 950 more models, not shown — all of them are in
+  `--format json``. The same cap applies to the breach list, the per-model
+  caveats and the not-estimated list. Under 50 models, nothing changes: no cap,
+  no note.
+
+  Rows are chosen by size, since the report is already ordered most expensive
+  first. **Terminal output is uncapped** — it scrolls — and **`--format json`
+  still carries every model**, so nothing is lost, only moved to where it fits.
+
 ## [1.0.3] - 2026-07-27
 
 ### Fixed
