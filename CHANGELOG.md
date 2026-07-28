@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [1.0.5] - 2026-07-28
+
+### Fixed
+
+- **A report spanning regions priced differently no longer states one rate as if
+  it applied to all of them.** The header named every region it covered and then
+  quoted a single rate beside them — whichever region happened to come first. The
+  built-in table spans 1.8× (US at USD 6.25, `southamerica-east1` at 11.25), so a
+  change touching both understated by nearly half in the report's most prominent
+  line. It now gives a range, and a single figure when every region agrees:
+
+  ```
+  dbt-costgate — region: EU, US, asia-northeast1 · on-demand USD 6.25–7.50/TiB · built-in table
+  ```
+
+  The per-region footer was always correct; only the summary above it was not.
+- **An unusual model name no longer breaks the report.** A name containing a
+  newline split the row in half — in the terminal table *and* the pull-request
+  comment. A name containing `|` spilled extra cells across the markdown table
+  and shifted every figure after it into the wrong column. A name containing an
+  escape character passed straight through to the terminal, so it could recolour
+  everything printed after it.
+
+  These are reachable rather than theoretical: a dbt model name comes from a
+  filename, and a filename may contain any of them. Control characters are now
+  shown as a space and pipes are escaped in markdown. **The name is unchanged
+  everywhere it is matched** — `exclude`, `warn_only` and `renames` still compare
+  against exactly what the manifest holds, and `--format json` still reports it
+  verbatim.
+
 ## [1.0.4] - 2026-07-27
 
 ### Fixed

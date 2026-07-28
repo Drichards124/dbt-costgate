@@ -202,9 +202,11 @@ showed that neither claim survived contact: the deadline bounded nothing (a
 reported the wrong kind. Both are fixed, and the difference between asserting a
 component and running it is the whole lesson.
 
-**EU pricing driven by an EU-resident table.** `job.location` round-trips `'EU'`,
-but with no EU dataset available the rate lookup was not driven end to end by a
-genuinely EU-hosted query. The lookup itself is covered by unit tests.
+~~**EU pricing driven by an EU-resident table.**~~ **Superseded — see
+[multi-region-2026-07-28.md](multi-region-2026-07-28.md).** Driven since, against
+real tables in `EU` and `asia-northeast1`. Doing so found a defect: the header
+took the first region's rate and stated it as the rate for every region it named,
+across a table that spans 1.8×.
 
 **A genuine permission denial.** Every 403 obtainable here came from a name that
 does not exist rather than from a table that exists and is closed to us. Same
