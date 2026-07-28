@@ -548,6 +548,56 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
     return "\n".join(lines)
 
 
+# How many rows of any one per-model list the markdown report will print.
+#
+# The markdown report becomes a pull-request comment, and GitHub rejects a
+# comment over 65,536 characters. `scripts/sticky_comment.sh` cuts oversized
+# bodies to fit, which is the right last resort but cuts from the end — and the
+# verdict used to sit after the table. Measured: the verdict lands at roughly
+# byte 70 x N, so past about 935 changed models the comment showed a wall of cost
+# rows, "…report truncated", and no PASS or FAIL anywhere in it.
+#
+# Four separate lists grew with the number of models — the table, the breaches,
+# the per-row caveats and the errors — so capping only the table would have left
+# three ways to reach the same limit. One cap, applied to all four, and the
+# verdict now comes first so it survives even if something else grows.
+#
+# 50 covers an ordinary pull request whole. Beyond that the comment says how many
+# it left out rather than trimming quietly, and `--format json` still carries
+# every model. Terminal output is deliberately uncapped: it scrolls.
+_MD_MAX_ROWS = 50
+
+
+def _capped(items: list, what: str) -> tuple[list, str | None]:
+    """The first `_MD_MAX_ROWS` items, and a line saying how many were left out.
+
+    The note is the point. A trimmed list that does not say it was trimmed reads
+    as the whole list, which is the failure this cap exists to prevent — not the
+    length itself.
+    """
+    if len(items) <= _MD_MAX_ROWS:
+        return items, None
+    left = len(items) - _MD_MAX_ROWS
+    note = f"_…and {left:,} more {what}, not shown — all of them are in `--format json`._"
+    return items[:_MD_MAX_ROWS], note
+
+
+def _verdict_block(report: Report) -> list[str]:
+    """The verdict and why, as markdown. First in the report, so that a comment
+    cut down to fit still answers the question it was posted to answer."""
+    v = report.verdict
+    if v.status == Status.PASS:
+        return ["✅ **Gate: PASS**"]
+    label = "FAIL" if v.status == Status.FAIL else "WARN"
+    icon = "❌" if v.status == Status.FAIL else "⚠️"
+    out = [f"{icon} **Gate: {label}**"]
+    shown, note = _capped(list(v.breaches), "breaching models")
+    out.extend(f"- {b}" for b in shown)
+    if note:
+        out.append(note)
+    return out
+
+
 def render_markdown(report: Report) -> str:
     d0 = report.disclosure
     diff = report.mode == "diff"
@@ -562,13 +612,33 @@ def render_markdown(report: Report) -> str:
         out.append(f"_{_DRYRUN_NOTE}_")
         return "\n".join(out)
 
+    # Ahead of the table, not after it: see `_MD_MAX_ROWS`. A reader wants the
+    # answer before the evidence anyway, so this costs nothing to read.
+    out.extend(_verdict_block(report))
+    net = _net_line(report)
+    allowance = _allowance_line(report)
+    if net or allowance:
+        # The net travels with the verdict rather than trailing the table. It is a
+        # summary, not a row, and leaving it below a list that may now be cut short
+        # would strand the one figure most readers came for.
+        out.append("")
+    if net:
+        label, _, rest = net.partition(": ")
+        out.append(f"**{label}:** {rest}")
+    if allowance:
+        # `<sub>` rather than bold: same job as in the terminal — context under the
+        # figure, quieter than the figure.
+        out.append(f"<sub>{allowance}</sub>")
+    out.append("")
+
     cur = d0.currency
+    rows, rows_note = _capped(report.deltas, "models")
     if diff and not d0.priced:
         # Explicitly `Δ %`: a bare `Δ` would mean money in the priced shape and a
         # percentage here, which is the same column heading meaning two things.
         out.append("| Model | Baseline | This change | Δ % |")
         out.append("|---|--:|--:|--:|")
-        for d in report.deltas:
+        for d in rows:
             out.append(
                 f"| {_md_name(d)} | {humanize_bytes(d.bytes_baseline)} | "
                 f"{humanize_bytes(d.bytes_current)} | {_pct_cell(d)} |"
@@ -578,7 +648,7 @@ def render_markdown(report: Report) -> str:
         # this one minus its money columns rather than a differently-shaped table.
         out.append("| Model | Baseline | This change | Δ % | Δ / run | Δ / month |")
         out.append("|---|--:|--:|--:|--:|--:|")
-        for d in report.deltas:
+        for d in rows:
             month = (
                 _money(d.usd_per_month_delta, cur, signed=True)
                 if d.usd_per_month_delta is not None
@@ -592,13 +662,13 @@ def render_markdown(report: Report) -> str:
     elif not d0.priced:
         out.append("| Model | Scanned |")
         out.append("|---|--:|")
-        for d in report.deltas:
+        for d in rows:
             out.append(f"| {_md_name(d)} | {humanize_bytes(d.bytes_current)} |")
     else:
         # Column headings stay currency-neutral; every cell carries its own code.
         out.append("| Model | Scanned | Cost / run | Cost / month |")
         out.append("|---|--:|--:|--:|")
-        for d in report.deltas:
+        for d in rows:
             cost = "not estimated" if d.error else _money(d.usd_current, cur)
             month = (
                 _money((d.usd_current or 0) * d.runs_per_month, cur)
@@ -607,41 +677,30 @@ def render_markdown(report: Report) -> str:
             )
             out.append(f"| {_md_name(d)} | {humanize_bytes(d.bytes_current)} | {cost} | {month} |")
 
-    caveats = [(d.name, w) for d in report.deltas for w in _row_warnings(d)]
-    errors = [(d.name, d.error) for d in report.deltas if d.error]
+    if rows_note:
+        out.append("")
+        out.append(rows_note)
+
+    caveats, caveats_note = _capped(
+        [(d.name, w) for d in report.deltas for w in _row_warnings(d)], "caveats"
+    )
+    errors, errors_note = _capped(
+        [(d.name, d.error) for d in report.deltas if d.error], "models that could not be estimated"
+    )
     footnotes = _basis_footnotes(report)
     if caveats or errors or footnotes:
         out.append("")
         for name, w in caveats:
             out.append(f"> ⚠ **{name}** — {w}")
+        if caveats_note:
+            out.append(f"> {caveats_note}")
         for name, e in errors:
             out.append(f"> • **{name}** — {e}")
+        if errors_note:
+            out.append(f"> {errors_note}")
         # Last: they annotate the table's tags rather than any one model, so they
         # read as the footnotes they are instead of more per-model caveats.
         out.extend(f"> ⚠ {note}" for note in footnotes)
-
-    net = _net_line(report)
-    allowance = _allowance_line(report)
-    if net or allowance:
-        out.append("")
-    if net:
-        label, _, rest = net.partition(": ")
-        out.append(f"**{label}:** {rest}")
-    if allowance:
-        # `<sub>` rather than bold: same placement as the terminal, same job —
-        # context under the figure, quieter than the figure.
-        out.append(f"<sub>{allowance}</sub>")
-
-    out.append("")
-    v = report.verdict
-    if v.status == Status.PASS:
-        out.append("✅ **Gate: PASS**")
-    else:
-        label = "FAIL" if v.status == Status.FAIL else "WARN"
-        icon = "❌" if v.status == Status.FAIL else "⚠️"
-        out.append(f"{icon} **Gate: {label}**")
-        for b in v.breaches:
-            out.append(f"- {b}")
 
     if report.notices:
         out.append("")

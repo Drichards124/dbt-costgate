@@ -387,10 +387,18 @@ def test_json_net_is_signed_so_a_saving_is_negative():
     assert rise["net"]["usd_per_run"] > 0
 
 
-def test_markdown_shows_the_net_above_the_gate_verdict():
+def test_markdown_leads_with_the_verdict_then_the_net_then_the_table():
+    """This order used to be the other way up — table, then net, then verdict.
+
+    The markdown report becomes a pull-request comment, and an oversized comment
+    is cut from the end to fit GitHub's 65,536-character limit. Measured against
+    a 1,000-model change, that cut removed the verdict entirely: the comment
+    showed a wall of cost rows and no PASS or FAIL anywhere in it. Summary first,
+    evidence after, so what survives a cut is the part worth keeping.
+    """
     out = report.render_markdown(_net_report([_delta("m", 9 * _TIB, 2 * _TIB)]))
     assert "**Net saving:** USD 43.75/run" in out
-    assert out.index("Net saving") < out.index("Gate:")
+    assert out.index("Gate:") < out.index("Net saving") < out.index("| Model |")
 
 
 # --- advisory notices -------------------------------------------------------
@@ -861,3 +869,67 @@ def test_the_monthly_total_ignores_rows_the_net_ignores():
     mismatched.comparable = False
     assert monthly_scan_bytes([mismatched]) is None
     assert monthly_scan_bytes([mismatched, _delta("ok", _TIB, 2 * _TIB, runs=30)]) == 2 * _TIB * 30
+
+
+# --- the pull-request comment has a hard size limit --------------------------
+#
+# GitHub rejects an issue comment over 65,536 characters, and
+# `scripts/sticky_comment.sh` cuts an oversized body to fit. That cut takes from
+# the end, so whatever the report puts last is what a large change loses.
+#
+# Measured before the fix, against a change where every model breached: the
+# verdict sat at roughly byte 70 x N, so past about 935 models the comment was a
+# wall of cost rows, "…report truncated", and no PASS or FAIL in it at all. The
+# exit code was still right and CI still blocked — but the thing a person reads
+# had lost its conclusion.
+
+_GH_COMMENT_LIMIT = 65536
+
+
+def _many(n: int, breaching: bool = True):
+    deltas = [_delta(f"fct_model_{i:04d}", _TIB, 3 * _TIB) for i in range(n)]
+    breaches = [f"fct_model_{i:04d}: +200% exceeds 25%" for i in range(n)] if breaching else []
+    return _net_report(deltas, status=Status.FAIL if breaching else Status.PASS, breaches=breaches)
+
+
+@pytest.mark.parametrize("n", [1, 49, 50, 51, 200, 1_000, 5_000])
+def test_the_markdown_report_always_fits_in_a_github_comment(n: int):
+    """Bounded by construction, so the downstream byte-cutter is a backstop and
+    not the thing standing between a reader and the verdict."""
+    out = report.render_markdown(_many(n))
+    assert len(out.encode()) < _GH_COMMENT_LIMIT, (
+        f"{n} models renders {len(out.encode()):,} bytes — over GitHub's limit, so the "
+        f"comment gets cut and the tail is lost"
+    )
+
+
+@pytest.mark.parametrize("n", [1, 50, 1_000, 5_000])
+def test_the_verdict_survives_however_many_models_changed(n: int):
+    out = report.render_markdown(_many(n))
+    assert "Gate: FAIL" in out
+    # First, not merely present: the cut takes from the end, so being early is
+    # what makes it safe rather than being included.
+    assert out.index("Gate: FAIL") < out.index("| Model |")
+
+
+def test_rows_left_out_of_the_table_are_counted_not_dropped():
+    """A trimmed list that does not say it was trimmed reads as the whole list,
+    which is worse than the length it was trimmed for."""
+    out = report.render_markdown(_many(1_000))
+    assert "and 950 more models, not shown" in out
+    assert "and 950 more breaching models, not shown" in out
+    assert "--format json" in out, "the note should say where the full list is"
+
+
+def test_a_report_that_fits_is_not_capped_at_all():
+    """The cap must be invisible to an ordinary pull request."""
+    out = report.render_markdown(_many(49))
+    assert "not shown" not in out
+    assert out.count("| `fct_model_") == 49
+
+
+def test_capping_the_comment_does_not_touch_the_json():
+    """JSON is the machine-readable record and a file rather than a comment, so
+    it carries every model however many there are."""
+    payload = json.loads(report.render_json(_many(1_000)))
+    assert len(payload["models"]) == 1_000
