@@ -8,10 +8,40 @@ isolation with hand-built instances and no I/O.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 
 TIB = 2**40
+
+# C0 and C1 control characters, plus DEL. Not a theoretical set: a dbt model name
+# is a filename stem, and POSIX allows every one of these in a filename except
+# the null byte and the slash.
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def display_name(name: str) -> str:
+    """A model name as it is safe to put in a report.
+
+    The name comes from a manifest the tool did not write, and it reaches a
+    terminal and a public pull-request comment unaltered. Three characters in it
+    used to break the report:
+
+    * a newline or carriage return split the row in half, in both renderers —
+      the terminal table lost its alignment and the markdown table lost the rest
+      of its columns;
+    * an escape character passed straight through to the terminal, so a model
+      name could recolour everything printed after it.
+
+    Replaced with a space rather than removed, so the name keeps its shape and a
+    reader can still recognise which model it is. The stored `name` is untouched:
+    it is the identity `exclude`, `warn_only` and `renames` match on, and altering
+    that would silently stop a user's configuration from matching.
+
+    The pipe is *not* handled here — it is ordinary text in a terminal and only
+    special inside a markdown table, so it is escaped there instead.
+    """
+    return _CONTROL_CHARS.sub(" ", name)
 
 
 def format_money(value: float | None, currency: str, *, signed: bool = False) -> str:

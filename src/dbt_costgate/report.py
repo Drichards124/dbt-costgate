@@ -26,6 +26,7 @@ from dbt_costgate.models import (
     PricingDisclosure,
     Report,
     Status,
+    display_name,
     format_money,
     format_pct,
     humanize_bytes,
@@ -82,6 +83,26 @@ def _tib(value: float) -> str:
 # messages. The code goes inline on every amount rather than once in a column
 # header, so a single quoted row or grepped line is never ambiguous.
 _money = format_money
+
+
+def _header_rate(d: PricingDisclosure) -> str:
+    """The rate for the header line, which names every region it covers.
+
+    A range when they disagree, because the header used to take the first
+    region's rate and present it as the rate for all of them. The regions were
+    already listed in the plural beside it, so a change spanning US and
+    southamerica-east1 announced `region: US, southamerica-east1 · on-demand USD
+    6.25/TiB` while half of it was priced at 11.25 — the built-in table spans
+    1.8x, and this is the most prominent line in the report.
+
+    The footer has always broken this out per region; it is only the summary that
+    claimed one number. A range says "look below" without spending a clause on
+    saying it.
+    """
+    rates = sorted(set(d.regions.values()))
+    if len(rates) == 1:
+        return _rate(d.currency, rates[0])
+    return f"{d.currency} {rates[0]:,.2f}–{rates[-1]:,.2f}/TiB"
 
 
 def _rate(currency: str, rate: float) -> str:
@@ -339,7 +360,7 @@ def _terminal_spec(report: Report) -> list[tuple[Column, object]]:
     spec: list[tuple[Column, object]] = [
         # Capped rather than unbounded: a name is identified by its ends, and one
         # 120-character outlier must not cost every other column its place.
-        (Column("MODEL", align="left", max_width=_MAX_NAME), lambda d: d.name),
+        (Column("MODEL", align="left", max_width=_MAX_NAME), lambda d: display_name(d.name)),
         # Unheaded: `new` / `full-refresh` describe the row, and a heading over
         # them would read as another measurement.
         (Column("", align="left"), _tag_cell),
@@ -433,8 +454,8 @@ def _model_notes(report: Report) -> list[tuple[str, str]]:
     about a figure that exists, `•` is the absence of one, and collapsing the two
     into undifferentiated prose would lose a distinction markdown keeps.
     """
-    pairs = [(f"⚠ {d.name}", w) for d in report.deltas for w in _row_warnings(d)]
-    pairs += [(f"• {d.name}", d.error) for d in report.deltas if d.error]
+    pairs = [(f"⚠ {display_name(d.name)}", w) for d in report.deltas for w in _row_warnings(d)]
+    pairs += [(f"• {display_name(d.name)}", d.error) for d in report.deltas if d.error]
     return pairs
 
 
@@ -445,12 +466,11 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
     lines: list[str] = []
 
     regions = ", ".join(d0.regions) or "—"
-    rate = next(iter(d0.regions.values()), None)
     tail = ""
     if not d0.priced:
         tail = " · bytes only (no per-byte price configured)"
-    elif rate is not None:
-        tail = f" · on-demand {_rate(d0.currency, rate)} · {d0.source}"
+    elif d0.regions:
+        tail = f" · on-demand {_header_rate(d0)} · {d0.source}"
         if d0.free_tib_per_month is not None:
             # In the pricing line, where a reader already looks to find out what
             # they are being charged — not buried in the footer. Same dim, same
@@ -682,10 +702,11 @@ def render_markdown(report: Report) -> str:
         out.append(rows_note)
 
     caveats, caveats_note = _capped(
-        [(d.name, w) for d in report.deltas for w in _row_warnings(d)], "caveats"
+        [(display_name(d.name), w) for d in report.deltas for w in _row_warnings(d)], "caveats"
     )
     errors, errors_note = _capped(
-        [(d.name, d.error) for d in report.deltas if d.error], "models that could not be estimated"
+        [(display_name(d.name), d.error) for d in report.deltas if d.error],
+        "models that could not be estimated",
     )
     footnotes = _basis_footnotes(report)
     if caveats or errors or footnotes:
@@ -722,7 +743,11 @@ def _md_name(d: CostDelta) -> str:
     if tag:
         tags.append(tag)
     suffix = f" _{', '.join(tags)}_" if tags else ""
-    return f"`{d.name}`{suffix}"
+    # The pipe is a column separator inside a markdown table, so a name
+    # carrying one used to spill extra cells across the row and shift every
+    # figure after it into the wrong column.
+    safe = display_name(d.name).replace("|", r"\|")
+    return f"`{safe}`{suffix}"
 
 
 def render_json(report: Report) -> str:
