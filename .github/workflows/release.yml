@@ -225,3 +225,83 @@ jobs:
             echo "Linking to this repository needs nothing: the image already carries the"
             echo "\`org.opencontainers.image.source\` label."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Marketplace listing is the fourth place a release lands, and the only one
+  # nothing here can publish to: the box is ticked by hand, in the release editor,
+  # after the release exists. It does not follow tags, so a forgotten tick leaves
+  # the listing advertising old code — which is exactly what happened, four
+  # releases running, until a scheduled check caught it.
+  #
+  # This deliberately does NOT fail because the tag being released is unpublished.
+  # It cannot be: the box cannot be ticked before the release this workflow is
+  # still creating. A check that failed on that would fail every single release
+  # and be switched off within a month.
+  #
+  # What it fails on is the *previous* release being unpublished too. One
+  # unpublished release is "not yet". Two in a row is "not at all", and by the
+  # time a new release is cut the previous one has had its whole life to be
+  # ticked. That gate has no false-failure mode, and it fires at the one moment
+  # the person who has to fix it is already looking.
+  marketplace:
+    name: Marketplace listing
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Say what still needs doing by hand, and fail if it keeps not being done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          edit_url="https://github.com/$GITHUB_REPOSITORY/releases/edit/$tag"
+
+          # Exits non-zero if the page can no longer be read, which fails this job
+          # rather than letting it report a listing it never managed to look at.
+          published="$(bash scripts/marketplace_published.sh)"
+          echo "Listing publishes: $(echo "$published" | tr '\n' ' ')"
+
+          if printf '%s\n' "$published" | grep -qxF "$tag"; then
+            echo "The listing already publishes $tag — nothing left to do." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### One manual step left: the Marketplace listing does not publish $tag"
+            echo ""
+            echo "The listing is published per release, by hand, and does not follow tags."
+            echo "Until the box is ticked it keeps advertising the previous version."
+            echo ""
+            echo "1. Open <$edit_url>"
+            echo "2. Tick **Publish this Action to the GitHub Marketplace**"
+            echo "3. **Update release**"
+            echo ""
+            echo "Use the release *editor* at that URL — not the repo banner's"
+            echo "*Draft a release*, which starts a new release and fails this workflow"
+            echo "twice over: the tag will not match \`__version__\`, and there is no"
+            echo "CHANGELOG section for it."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Marketplace::Tick the Marketplace box on $tag — $edit_url"
+
+          # The gate. `gh release list` is newest-first, so dropping the tag just
+          # released leaves the one before it at the top.
+          previous="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10 \
+            --json tagName --jq '.[].tagName' | grep -vxF "$tag" | head -1 || true)"
+          if [ -z "$previous" ]; then
+            echo "No earlier release to compare against — nothing to enforce yet."
+            exit 0
+          fi
+          if printf '%s\n' "$published" | grep -qxF "$previous"; then
+            echo "$previous is published, so the step does get done. $tag is simply not ticked yet."
+            exit 0
+          fi
+          echo "::error title=Marketplace is being skipped::The listing publishes neither $tag nor $previous."
+          echo "Two releases unpublished in a row is not 'not yet' — it is a step that is not happening." >&2
+          echo "Publish both, newest last: $edit_url" >&2
+          exit 1
