@@ -224,7 +224,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 ## Roadmap
 
 **The MVP roadmap is complete** — every item below ships as of
-[v1.0.4](https://github.com/Drichards124/dbt-costgate/releases/latest).
+[v1.0.5](https://github.com/Drichards124/dbt-costgate/releases/latest).
 
 - [x] **`dbt-costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [x] **One-command local diff** — `dbt-costgate check --against main` (isolated git worktree)
@@ -233,7 +233,7 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
 - [x] **`pre-commit` hook** — catch it on your own machine, at pre-push
 - [x] **Docker image** — for CI that isn't GitHub Actions; build it yourself, or
-- [x] **pull the published image** — `ghcr.io/drichards124/dbt-costgate:v1.0.4`, pushed on every release
+- [x] **pull the published image** — `ghcr.io/drichards124/dbt-costgate:v1.0.5`, pushed on every release
 
 **What's next is not another feature.** The list above was written before anyone
 had run this against a real warehouse for a month. The useful next step is use —
