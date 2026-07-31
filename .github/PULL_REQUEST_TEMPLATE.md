@@ -22,7 +22,6 @@ If this touches warehouse interaction, pricing, or reporting, confirm:
 ## Checklist
 
 - [ ] Targets the `ple` branch.
-- [ ] All commits are signed off for the DCO (`git commit -s`).
 - [ ] Every new source file has the SPDX header (`SPDX-License-Identifier: Apache-2.0`).
 - [ ] Tests pass locally (`python -m pytest -q`).
 - [ ] Lint passes (`ruff check . && ruff format --check .`).
