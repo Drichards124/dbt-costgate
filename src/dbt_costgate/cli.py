@@ -21,6 +21,7 @@ from dbt_costgate import (
     policy,
     report,
 )
+from dbt_costgate import config as config_ref
 from dbt_costgate.against import AgainstError
 from dbt_costgate.artifacts import ArtifactError
 from dbt_costgate.bigquery import BigQueryDryRunner, DryRunner
@@ -36,6 +37,72 @@ from dbt_costgate.gitdiff import GitDiffError
 from dbt_costgate.models import PricingDisclosure, Report
 from dbt_costgate.pricing import PricingTable
 
+# One line per subcommand, written once. `build_parser` puts these in argparse's
+# `--help` and `render_quickstart` puts them in the no-argument screen; a command
+# described in one place and not the other is a command someone will not find.
+_COMMAND_SUMMARIES: tuple[tuple[str, str], ...] = (
+    ("check", "Estimate the BigQuery cost impact of changed dbt models."),
+    ("config", "List every .dbt-costgate.yml setting, one line each."),
+    ("init", "Write a starter .dbt-costgate.yml, with every setting commented out."),
+)
+_SUMMARY = dict(_COMMAND_SUMMARIES)
+
+
+def render_quickstart(width: int, palette: layout.Palette) -> str:
+    """What `dbt-costgate` on its own prints.
+
+    It used to print argparse's usage block, which answers "what flags exist"
+    for someone who already knows what the tool does. The first question is
+    "what do I run first", and the honest answer is short: compile, then check.
+    Configuration is the second visit, not the first, so it comes after — a
+    first screen that opens with twenty settings is why setup reads as daunting.
+    """
+    pal = palette
+    lines = [
+        f"{pal.bold('dbt-costgate')} {pal.dim(__version__)}",
+        "BigQuery cost gate for dbt pull requests.",
+        "",
+        pal.bold("Start here"),
+        "",
+        f"  {pal.dim('1')}  Compile your dbt project        {pal.bold('dbt compile')}",
+        f"  {pal.dim('2')}  Price what you changed          {pal.bold('dbt-costgate check')}",
+        "",
+    ]
+    lines += layout.wrap(
+        "That is the whole local loop — no config file needed. `check` dry-runs the "
+        "models your branch touched and prints what each one costs to scan.",
+        layout.prose_width(width),
+        indent=2,
+    )
+    lines += ["", pal.bold("Then, to gate a pull request on cost"), ""]
+    lines += [
+        f"  {pal.dim('3')}  Write a starter config file     {pal.bold('dbt-costgate init')}",
+        f"  {pal.dim('4')}  See everything you can set      {pal.bold('dbt-costgate config')}",
+        "",
+    ]
+    lines += layout.wrap(
+        "Set a threshold in .dbt-costgate.yml and `check` exits non-zero when a change "
+        "crosses it, which is what turns the report into a gate.",
+        layout.prose_width(width),
+        indent=2,
+    )
+
+    lines += ["", pal.bold("Commands"), ""]
+    name_w = max(len(name) for name, _ in _COMMAND_SUMMARIES)
+    for name, summary in _COMMAND_SUMMARIES:
+        lines += layout.hanging_row(f"  {layout.pad(name, name_w)}  ", summary, width)
+    lines += ["", pal.dim("  dbt-costgate <command> --help   options for one command")]
+
+    lines += ["", pal.bold("If check cannot reach BigQuery"), ""]
+    lines += layout.wrap(
+        "It needs Application Default Credentials: `gcloud auth application-default "
+        "login`. BigQuery answers the same way whether a dry-run is not permitted or "
+        "the dataset does not exist, so check those names too.",
+        layout.prose_width(width),
+        indent=2,
+    )
+    return "\n".join(lines)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -47,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser(
         "check",
-        help="Estimate the BigQuery cost impact of changed dbt models.",
+        help=_SUMMARY["check"],
         description=(
             "Dry-run the models this change touches and report their scan cost. "
             "With --baseline (or --against <ref>, which auto-compiles that ref in "
@@ -136,18 +203,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     cfg = sub.add_parser(
         "config",
-        help="List every .dbt-costgate.yml key with a plain-English explanation.",
+        help=_SUMMARY["config"],
         description=(
-            "Print the full configuration reference — every key dbt-costgate reads "
-            "from .dbt-costgate.yml, its type, default, and what it does. Use "
-            "--format json for a machine-readable list."
+            "Print the configuration reference — every key dbt-costgate reads from "
+            ".dbt-costgate.yml, its type, default, and what it does. With no "
+            "argument, one scannable line per setting. Name a key (or a whole "
+            "section) for the full explanation and the YAML that sets it. Use "
+            "--verbose for all of them in full, or --format json for a "
+            "machine-readable list."
         ),
     )
+    cfg.add_argument(
+        "key",
+        nargs="?",
+        help="A setting to explain in full, e.g. thresholds.max_pct_increase — or a "
+        "section name such as pricing for every key under it.",
+    )
     cfg.add_argument("--format", choices=["terminal", "json"], default="terminal")
+    cfg.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Explain every setting in full, instead of one line each.",
+    )
+    cfg.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Colour the output (default: auto — on at a terminal, off when piped "
+        "or when NO_COLOR is set).",
+    )
 
     init = sub.add_parser(
         "init",
-        help="Write a starter .dbt-costgate.yml, with every setting commented out.",
+        help=_SUMMARY["init"],
         description=(
             "Create a .dbt-costgate.yml in the project directory, documenting every "
             "setting with an example value and leaving all of them commented out, so "
@@ -607,22 +695,74 @@ def run_check(args: argparse.Namespace, runner: DryRunner | None = None) -> int:
     return verdict.exit_code
 
 
+def _config_json(fields) -> str:
+    return json.dumps(
+        [
+            {
+                "key": f.key,
+                "type": f.type_label,
+                "default": f.default,
+                "summary": f.summary,
+                "help": f.help,
+            }
+            for f in fields
+        ],
+        indent=2,
+    )
+
+
+def _selected_fields(key: str | None):
+    """The entries `config [key]` asks for. Raises _UsageError on a name that
+    matches neither a setting nor a section."""
+    if key is None:
+        return list(CONFIG_REFERENCE)
+    field = config_ref.find_field(key)
+    if field is not None:
+        return [field]
+    section = config_ref.section_fields(key)
+    if section:
+        return section
+    # "unknown setting" is the parser's wording for the same mistake made in the
+    # file, so the two read alike wherever it was typed. The suggestion and the
+    # pointer to the full list are alternatives rather than a pair: naming the
+    # likely setting already answers the question, and printing both ran the line
+    # to 138 characters — too wide for the terminal it goes to, which is the
+    # defect this whole change set out to fix.
+    close = config_ref.suggest_key(key)
+    if close:
+        raise _UsageError(f"unknown setting `{key}` — try `{close}`.")
+    raise _UsageError(f"unknown setting `{key}`. Run `dbt-costgate config` for the list.")
+
+
 def run_config(args: argparse.Namespace) -> int:
+    try:
+        fields = _selected_fields(args.key)
+    except _UsageError as exc:
+        print(f"dbt-costgate: {exc}", file=sys.stderr)
+        return policy.EXIT_OPERATIONAL
+
     if args.format == "json":
-        payload = [
-            {"key": f.key, "type": f.type_label, "default": f.default, "help": f.help}
-            for f in CONFIG_REFERENCE
-        ]
-        print(json.dumps(payload, indent=2))
+        print(_config_json(fields))
         return 0
 
-    key_w = max(len(f.key) for f in CONFIG_REFERENCE)
-    type_w = max(len(f.type_label) for f in CONFIG_REFERENCE)
-    print("dbt-costgate configuration keys (.dbt-costgate.yml). CLI flags override the file.\n")
-    for f in CONFIG_REFERENCE:
-        default = "none" if f.default is None else str(f.default)
-        print(f"{f.key.ljust(key_w)}  {f.type_label.ljust(type_w)}  default: {default}")
-        print(f"    {f.help}")
+    # help_width, not terminal_width: a reference piped to `less` is still being
+    # read in the window it came from. Colour still goes off when piped — that
+    # one is about what the receiving program can render, not how wide it is.
+    width = layout.help_width(sys.stdout)
+    palette = layout.Palette(layout.should_color(args.color, sys.stdout))
+
+    # Naming a key is itself a request for the detail, so --verbose is implied.
+    # The YAML snippet is only worth printing for a single key: repeated down a
+    # whole section it restates the same `pricing:` header five times.
+    if args.key is not None:
+        blocks = [
+            config_ref.render_key(f, width, palette, with_example=len(fields) == 1) for f in fields
+        ]
+        print("\n\n".join(blocks))
+    elif args.verbose:
+        print(config_ref.render_verbose_reference(width, palette))
+    else:
+        print(config_ref.render_reference(width, palette))
     return 0
 
 
@@ -663,7 +803,12 @@ def main(argv: list[str] | None = None, runner: DryRunner | None = None) -> int:
         return run_config(args)
     if args.command == "init":
         return run_init(args)
-    parser.print_help()
+    print(
+        render_quickstart(
+            layout.help_width(sys.stdout),
+            layout.Palette(layout.should_color("auto", sys.stdout)),
+        )
+    )
     return 0
 
 

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
+## [Unreleased]
+
+### Fixed
+
+- **`dbt-costgate config` no longer runs off the side of the terminal.** It
+  printed each setting's whole explanation on one unwrapped line — up to 600
+  characters — so on an 80-column terminal the text wrapped back to column 0 and
+  sat flush against the next setting's name, with no blank line between entries.
+  29 of its 42 lines were too wide to fit. Every screen now wraps to the width of
+  the terminal it is printing to.
+
+### Changed
+
+- **`dbt-costgate config` now lists one line per setting instead of twenty
+  paragraphs.** The list is grouped and indented the way the settings nest in
+  `.dbt-costgate.yml`, so it doubles as a guide to the file's shape:
+
+  ```
+  pricing:
+    region                      str    Force the pricing region
+    usd_per_tib                 float  Flat USD/TiB rate for every region
+  ```
+
+  The full explanations moved behind two new forms rather than going away.
+- **`dbt-costgate config <key>` explains one setting and shows the YAML that sets
+  it**, nested under the right section header so it can be pasted as-is. A
+  section name (`dbt-costgate config pricing`) prints everything under it, and
+  the leaf on its own (`dbt-costgate config max_pct_increase`) works as well as
+  the dotted key, because the leaf is what the list displays. An unrecognised
+  name exits 2 and suggests the nearest real one.
+- **`dbt-costgate config --verbose`** prints every setting's full explanation —
+  what the command used to do by default.
+- **`dbt-costgate config` takes `--color auto|always|never`**, matching `check`.
+- **`dbt-costgate` with no arguments now shows how to get started** instead of a
+  list of flags: the two commands that make up the local loop, the two more that
+  turn it into a pull-request gate, and what to run when it cannot reach
+  BigQuery.
+- **`dbt-costgate init` says which setting to uncomment first** and no longer
+  claims every key's note states its default, which was not true of all of them.
+- **`dbt-costgate config --format json` gained a `summary` field** — the short
+  label the list shows. Existing fields are unchanged.
+- **`dbt-costgate config` and the no-argument screen now follow your terminal
+  width even when their output is piped or redirected**, so `dbt-costgate config
+  | less` and `dbt-costgate config > settings.txt` come out at the width of the
+  window you ran them in rather than a fixed 100 columns. Set `COLUMNS` to pin it
+  yourself; with no terminal anywhere — a CI log — it stays at 100.
+
+  **Which report goes where is deliberately unchanged**: `dbt-costgate check`
+  still renders at a fixed width whenever its output is not a terminal, so a
+  report committed to a repo or read back out of a CI log does not depend on the
+  window that produced it.
+- **Paragraphs now stop at 100 characters on a wide terminal; tables still use
+  the full width.** Sentences set 200 characters wide are hard to read back —
+  the eye loses the start of the next line — while a table is read down a column
+  and a wide window buys it a model name that no longer needs truncating. This
+  applies to explanatory text everywhere it appears: `config`, the no-argument
+  screen, and a report's notes, notices, breach lines and footer.
+
+  Nothing that gets written to a file or a CI log changes, because those already
+  rendered at 100. The pricing header line is not capped either — it is a row of
+  figures rather than a sentence, and capping it would split it across two lines
+  on a terminal wide enough to show it on one.
+
 ## [1.0.5] - 2026-07-28
 
 ### Fixed

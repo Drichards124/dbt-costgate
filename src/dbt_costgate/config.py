@@ -11,6 +11,8 @@ from typing import Any
 
 import yaml
 
+from dbt_costgate import layout
+
 
 class ConfigError(Exception):
     """A `.dbt-costgate.yml` the tool will not act on, reported as exit 2.
@@ -359,6 +361,13 @@ class ConfigField:
     type_label: str  # human type hint, e.g. "map[str->float]"
     default: Any  # the literal parser default (native value, for a clean JSON contract)
     help: str  # plain-English explanation; notes the *effective* default when it differs
+    # One scannable line, for the list `dbt-costgate config` prints by default.
+    # Written rather than cut from `help`, because the first sentence of a `help`
+    # is written to open a paragraph and reads as a fragment on its own — and
+    # truncating one mid-clause ("Absolute ceiling: gate fails if a model's…")
+    # is worse than no summary at all. Capped at SUMMARY_WIDTH so the column
+    # cannot silently push the list past a narrow terminal; a test enforces it.
+    summary: str = ""
     # An illustrative value, as YAML. Scalars are written inline after the key;
     # `map[...]`/`list[...]` entries are written as an indented block under it,
     # decided from type_label rather than by inspecting the string. This is what
@@ -367,6 +376,14 @@ class ConfigField:
     # fail_on) shows something that visibly differs from doing nothing.
     example: str = ""
 
+
+# The `summary` column budget, in characters. Derived from the narrowest terminal
+# the report will lay a table out in: the key column is sized by the longest leaf
+# name, and this is what is left over at MIN_TABLE_WIDTH once the type column and
+# its gutters are taken out. Enforced by a test rather than truncated at render
+# time, because a summary cut mid-word is a defect the author should see, not one
+# the user should.
+SUMMARY_WIDTH = 42
 
 # Every key `Config._from_dict` understands, described once. Keep this in lockstep
 # with the dataclass — `tests/test_config.py` enforces it in both directions.
@@ -378,6 +395,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Force the pricing region. Default: auto-detected from the dry-run job "
         "location, falling back to US.",
+        summary="Force the pricing region",
         example="europe-west3",
     ),
     ConfigField(
@@ -387,6 +405,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Flat on-demand rate override (USD/TiB) for every region. Default: the "
         "built-in per-region rate table.",
+        summary="Flat USD/TiB rate for every region",
         example="5.00",
     ),
     ConfigField(
@@ -399,6 +418,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "yourself — dbt-costgate never converts between currencies — so any "
         "region still priced from the built-in table is an error, not a "
         "conversion.",
+        summary="Currency code to label amounts with",
         example="EUR",
     ),
     ConfigField(
@@ -409,6 +429,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Per-region rate overrides (region -> USD/TiB) that patch the built-in "
         "table. Keys match case-insensitively; 0 is allowed. Unlisted regions "
         "use the table.",
+        summary="Per-region rate overrides",
         example="europe-west3: 4.80\nUS: 6.00",
     ),
     ConfigField(
@@ -424,6 +445,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "see, so subtracting it would be a guess a gate should not make. Needs "
         "run_frequency to have a monthly figure to compare. Default: unset, "
         "which reports the tier without a figure.",
+        summary="Free TiB/month, reported not deducted",
         example="1",
     ),
     ConfigField(
@@ -432,6 +454,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's per-run cost increase exceeds this many USD.",
+        summary="Fail over this $/run increase",
         example="5.00",
     ),
     ConfigField(
@@ -440,6 +463,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's cost increases by more than this percent.",
+        summary="Fail over this % increase",
         example="25",
     ),
     ConfigField(
@@ -448,6 +472,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "float",
         None,
         "Gate fails if a model's projected monthly cost increase exceeds this many USD.",
+        summary="Fail over this $/month increase",
         example="100.00",
     ),
     ConfigField(
@@ -457,6 +482,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Absolute ceiling: gate fails if a model's total per-run cost exceeds this "
         "many USD, regardless of its increase. Needs no baseline (works in local mode).",
+        summary="Cap total $/run (needs no baseline)",
         example="20.00",
     ),
     ConfigField(
@@ -466,6 +492,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Absolute ceiling: gate fails if a model's total per-run scan exceeds this "
         "many TiB, regardless of its increase. Needs no baseline (works in local mode).",
+        summary="Cap total TiB/run (needs no baseline)",
         example="3.00",
     ),
     ConfigField(
@@ -475,6 +502,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Assumed runs per month for the monthly-cost estimate, for models "
         "without an explicit entry.",
+        summary="Assumed runs/month for monthly figures",
         example="30",
     ),
     ConfigField(
@@ -483,6 +511,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "map[str->int]",
         {},
         "Per-model runs-per-month overrides (model name -> runs) for the monthly estimate.",
+        summary="Per-model runs/month overrides",
         example="fct_orders_daily: 24",
     ),
     ConfigField(
@@ -491,6 +520,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "list[str]",
         [],
         "Model names reported but never gated.",
+        summary="Models reported but never gated",
         example="- events_partitioned",
     ),
     ConfigField(
@@ -499,6 +529,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "list[str]",
         [],
         "Model names shown as a warning instead of gated.",
+        summary="Models warned about instead of gated",
         example="- sessions_rolling",
     ),
     ConfigField(
@@ -509,6 +540,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Pair a renamed model to its baseline for a diff (current -> baseline), for "
         "when a model rename changes its unique_id and auto-matching can't. Each side "
         "is a model name or a full unique_id. Requires a baseline (diff mode).",
+        summary="Match a renamed model to its baseline",
         example="fct_orders_daily: fct_orders_monthly",
     ),
     ConfigField(
@@ -519,6 +551,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "Named baseline sources (dbt --target analogy). Each name maps to either a "
         "`manifest:` path or an `against:` git ref. Select one with --baseline-target "
         "<name>; a `manifest` target travels to CI, an `against` target needs git+dbt.",
+        summary="Named baselines to diff against",
         example="main:\n  against: main\nple:\n  manifest: artifacts/ple/manifest.json",
     ),
     ConfigField(
@@ -528,6 +561,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         None,
         "Name of the `baselines:` entry to use when no --baseline/--against/"
         "--baseline-target is given, so `dbt-costgate check` diffs without a flag.",
+        summary="Which baseline to use with no flag",
         example="main",
     ),
     ConfigField(
@@ -536,6 +570,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "terminal|markdown|json",
         "terminal",
         "Output format when not overridden by --format.",
+        summary="terminal, markdown or json",
         example="markdown",
     ),
     ConfigField(
@@ -547,6 +582,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "(the default) and 'warn' both exit 1 on a breach; they differ only in "
         "the label the report prints, FAIL or WARN. Warnings themselves are "
         "never an input to the gate.",
+        summary="Gate strictness: never, warn or fail",
         example="warn",
     ),
     ConfigField(
@@ -560,6 +596,7 @@ CONFIG_REFERENCE: list[ConfigField] = [
         "is per-notice on purpose: there is no blanket off-switch, so turning "
         "one off can never hide a different one you have not seen. An unknown "
         "id is an error, not a no-op.",
+        summary="Advisory notice ids to stop showing",
         example="- dead-money-thresholds",
     ),
 ]
@@ -608,6 +645,245 @@ def validate_numbers(config: Config) -> None:
             reject_negative(field_.key, value)
 
 
+# --- the `dbt-costgate config` reference ----------------------------------
+#
+# Rendered here rather than in `cli` for the reason `render_config_template` is:
+# both turn CONFIG_REFERENCE into text for a person to read, and keeping them
+# side by side is what stops the printed reference and the generated starter file
+# describing the same key two different ways.
+
+# Where a leaf key sits under its section header, matching the indent the setting
+# will have in the file. The reference is also a shape guide for the YAML.
+_KEY_INDENT = 2
+
+
+def short_type(type_label: str) -> str:
+    """The one-word type for the scannable list.
+
+    The full labels are precise and long — `map[str->{manifest|against}]` is 28
+    characters, and padding a column to it left every other row trailing twenty
+    spaces and pushed the line past an 80-column terminal. The precise label is
+    still what `config <key>` prints, where there is room for it and where
+    someone has asked for the detail.
+    """
+    if type_label.startswith("map["):
+        return "map"
+    if type_label.startswith("list["):
+        return "list"
+    return "enum" if "|" in type_label else type_label
+
+
+def default_label(field_: ConfigField) -> str:
+    """A default as a person would say it, not as Python repr()s it.
+
+    "none", the old wording, is a value in YAML and reads as one: `default: none`
+    invited people to write `region: none` and mean it. An empty map and an empty
+    list are likewise not values anyone types.
+    """
+    if field_.default is None:
+        return "not set"
+    if isinstance(field_.default, (dict, list)) and not field_.default:
+        return "empty"
+    return str(field_.default)
+
+
+def _display_name(field_: ConfigField) -> str:
+    """The key as the list shows it: a leaf indented under its section, or a
+    top-level key at the margin — the shape it has in the file."""
+    head, _, leaf = field_.key.rpartition(".")
+    return f"{' ' * _KEY_INDENT}{leaf}" if head else leaf
+
+
+def _grouped() -> list[tuple[str, list[ConfigField]]]:
+    """CONFIG_REFERENCE by YAML section, registry order kept inside each.
+
+    Sections appear in the order they first occur. The keys that live at the top
+    level of the file are collected and emitted last: in registry order they fall
+    between the sections, and six unindented keys scattered through five indented
+    blocks read as five blocks that someone broke.
+    """
+    groups: dict[str, list[ConfigField]] = {}
+    for field_ in CONFIG_REFERENCE:
+        groups.setdefault(field_.key.rpartition(".")[0], []).append(field_)
+    top_level = groups.pop("", [])
+    ordered = list(groups.items())
+    if top_level:
+        ordered.append(("", top_level))
+    return ordered
+
+
+def _columns() -> tuple[int, int]:
+    """(key column, type column) in cells, sized to the widest entry of each."""
+    key_w = max(layout.display_width(_display_name(f)) for f in CONFIG_REFERENCE)
+    type_w = max(layout.display_width(short_type(f.type_label)) for f in CONFIG_REFERENCE)
+    return key_w, type_w
+
+
+def find_field(name: str) -> ConfigField | None:
+    """The registry entry for a key, or None.
+
+    Accepts the dotted key, and a bare leaf name where it is unambiguous. That
+    second form is what people actually type: the list shows `max_pct_increase`
+    indented under `thresholds:`, and asking someone to retype the header they
+    can see is a way of being right rather than useful. Every leaf in the
+    registry is distinct today and a test holds it that way, so the shortcut
+    cannot quietly start resolving to whichever entry happens to come first.
+    """
+    exact = next((f for f in CONFIG_REFERENCE if f.key == name), None)
+    if exact is not None:
+        return exact
+    leaves = [f for f in CONFIG_REFERENCE if f.key.rpartition(".")[2] == name]
+    return leaves[0] if len(leaves) == 1 else None
+
+
+def section_fields(name: str) -> list[ConfigField]:
+    """Every entry under a section header, so `config pricing` works as well as
+    `config pricing.region`. Empty when `name` is not a section."""
+    return [f for f in CONFIG_REFERENCE if f.key.rpartition(".")[0] == name]
+
+
+def suggest_key(name: str) -> str:
+    """The "did you mean …?" for a key that matched nothing, or "" if nothing is
+    close. Same rule as the config parser's unknown-key error, so a typo reads
+    the same whether it was typed at the shell or into the file.
+
+    Leaf names are tried as well as dotted keys, and for the same reason
+    `find_field` accepts them: `max_pct` is nowhere near
+    `thresholds.max_pct_increase` once the section prefix is counted, and a
+    near-miss on what the list displays is the likeliest kind of near-miss there
+    is.
+    """
+    close = difflib.get_close_matches(
+        name, sorted(f.key for f in CONFIG_REFERENCE), n=1, cutoff=0.6
+    )
+    if close:
+        return close[0]
+    by_leaf = {f.key.rpartition(".")[2]: f.key for f in CONFIG_REFERENCE}
+    close = difflib.get_close_matches(name, sorted(by_leaf), n=1, cutoff=0.6)
+    return by_leaf[close[0]] if close else ""
+
+
+def render_reference(width: int, palette: layout.Palette | None = None) -> str:
+    """The default `dbt-costgate config` view: every key on one scannable line.
+
+    Twenty settings, each with a paragraph, is a wall of text at the exact moment
+    someone is deciding whether this tool is worth the setup. The list answers
+    "what can I set?" at a glance and hands the paragraphs to `config <key>`,
+    which is asked for only once the reader knows which key they want.
+    """
+    pal = palette or layout.Palette(False)
+    key_w, type_w = _columns()
+
+    lines = [pal.bold("dbt-costgate configuration"), ""]
+    lines += layout.wrap(
+        f"{len(CONFIG_REFERENCE)} settings for .dbt-costgate.yml, shown the way "
+        "they nest in the file. Every one is optional, and the matching command-line "
+        "flag wins where there is one.",
+        layout.prose_width(width),
+        indent=2,
+    )
+
+    for section, entries in _grouped():
+        lines.append("")
+        lines.append(pal.bold(f"{section}:") if section else pal.dim("at the top level"))
+        for field_ in entries:
+            name = layout.pad(_display_name(field_), key_w)
+            type_ = layout.pad(short_type(field_.type_label), type_w)
+            # The summary wraps under itself rather than running past the edge:
+            # this column is the first thing to lose room on a narrow terminal.
+            prefix = f"{name}  {pal.dim(type_)}  "
+            lines += layout.hanging_row(prefix, field_.summary, width)
+
+    next_w = max(len(command) for command, _ in _NEXT_STEPS)
+    lines += ["", pal.bold("Next")]
+    for command, what in _NEXT_STEPS:
+        lines += layout.hanging_row(
+            f"  {layout.pad(command, next_w)}  ", what, width, style=pal.dim
+        )
+    return "\n".join(lines)
+
+
+# Where to go from the list, in the order someone needs them.
+_NEXT_STEPS: tuple[tuple[str, str], ...] = (
+    ("dbt-costgate config <key>", "one setting, explained in full"),
+    ("dbt-costgate config --verbose", "all of them, explained in full"),
+    ("dbt-costgate init", "write a starter file with these in it"),
+)
+
+
+def render_verbose_reference(width: int, palette: layout.Palette | None = None) -> str:
+    """`config --verbose`: every key with its full explanation, still grouped."""
+    pal = palette or layout.Palette(False)
+    lines = [pal.bold("dbt-costgate configuration"), ""]
+    lines += layout.wrap(
+        f"All {len(CONFIG_REFERENCE)} settings for .dbt-costgate.yml, in full. "
+        "`dbt-costgate config` alone prints the same list one line per key.",
+        layout.prose_width(width),
+        indent=2,
+    )
+    for section, entries in _grouped():
+        lines += ["", pal.bold(f"{section}:") if section else pal.dim("at the top level"), ""]
+        for field_ in entries:
+            lines += _detail_block(field_, width, pal, indent=2)
+            lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def render_key(
+    field_: ConfigField,
+    width: int,
+    palette: layout.Palette | None = None,
+    *,
+    with_example: bool = True,
+) -> str:
+    """`config <key>`: one setting, with the YAML to paste for it."""
+    pal = palette or layout.Palette(False)
+    return "\n".join(_detail_block(field_, width, pal, indent=2, with_example=with_example))
+
+
+def _detail_block(
+    field_: ConfigField,
+    width: int,
+    pal: layout.Palette,
+    *,
+    indent: int = 2,
+    with_example: bool = False,
+) -> list[str]:
+    """One key in full: name, type and default, the explanation, and optionally
+    the YAML that sets it."""
+    pad_ = " " * indent
+    lines = [
+        pal.bold(f"{pad_}{field_.key}"),
+        pal.dim(f"{pad_}{field_.type_label}  ·  default: {default_label(field_)}"),
+        "",
+    ]
+    lines += layout.wrap(
+        " ".join(field_.help.split()), layout.prose_width(width), indent=indent + 2
+    )
+    if with_example:
+        lines += ["", f"{pad_}{pal.dim('In .dbt-costgate.yml:')}", ""]
+        lines += [f"{pad_}  {line}" for line in example_yaml(field_).splitlines()]
+    return lines
+
+
+def example_yaml(field_: ConfigField) -> str:
+    """The illustrative YAML for one key, nested under its section.
+
+    Shares `render_config_template`'s rule that a map or a list has to sit in a
+    block under its key — `exclude: - events_partitioned` is not YAML — so the
+    snippet a reader pastes and the starter file `init` writes cannot disagree.
+    """
+    head, _, leaf = field_.key.rpartition(".")
+    body = [f"{leaf}:"] if field_.type_label.startswith(("map[", "list[")) else []
+    if body:
+        body += [f"  {line}" for line in field_.example.splitlines()]
+    else:
+        body = [f"{leaf}: {field_.example}"]
+    if head:
+        return "\n".join([f"{head}:", *[f"  {line}" for line in body]])
+    return "\n".join(body)
+
+
 _TEMPLATE_PREAMBLE = """\
 # .dbt-costgate.yml — written by `dbt-costgate init`.
 #
@@ -615,9 +891,15 @@ _TEMPLATE_PREAMBLE = """\
 # uncomment one. Section headers are left live, so switching a setting on is a
 # one-line edit.
 #
-# The values shown are illustrations, not defaults. Each key's real default is
-# in the note above it, and `dbt-costgate config` prints the same reference
-# at any time.
+# Start here: uncomment one threshold. Thresholds are what turn the report into
+# a gate — with none set, `dbt-costgate check` prices your change and always
+# passes. `thresholds.max_usd_total` is the one to try first, because it caps a
+# model's total cost and so needs no baseline to compare against.
+#
+# The values shown are illustrations, not defaults. Every setting here is
+# optional and unset until you uncomment it; where a key does something specific
+# when left unset, its note says so. `dbt-costgate config` lists all of them one
+# line each, and `dbt-costgate config <key>` prints one in full.
 #
 # Commit this file. `dbt-costgate check` reads it identically on your machine
 # and in CI, so there is nothing separate to configure for a PR run.
