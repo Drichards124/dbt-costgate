@@ -4,69 +4,48 @@
 
 # dbt-costgate
 
-**The BigQuery cost gate for dbt pull requests.**
+**Know what a dbt pull request will cost — before you merge it.**
 
 Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before* it merges — not on next month's bill.
 
-[![CI](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml)
-[![PLE](https://github.com/Drichards124/dbt-costgate/actions/workflows/ple.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ple.yml)
+[![Dry-run only](https://img.shields.io/badge/queries-dry--run%20only-2ea043)](#safe-to-run-next-to-production-credentials)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-2ea043)](#safe-to-run-next-to-production-credentials)
+[![PyPI](https://img.shields.io/pypi/v/dbt-costgate?label=pypi&color=0b7285)](https://pypi.org/project/dbt-costgate/)
 [![Python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230)](https://docs.astral.sh/ruff/)
-[![Status](https://img.shields.io/badge/status-MVP-brightgreen)](#roadmap)
+[![CI](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml)
+[![Status](https://img.shields.io/badge/status-MVP-brightgreen)](#project-maturity)
 
 [Quick start](#quick-start) ·
-[How it works](#how-it-works) ·
-[What you get](#what-you-get-on-every-pr) ·
-[Where it fits](#where-it-fits) ·
-[Pricing accuracy](#accurate-transparent-pricing) ·
-[Security](#security-model) ·
-[Roadmap](#roadmap) ·
-[Contributing](CONTRIBUTING.md)
-
-**New here? Start with [dbt-costgate, explained](docs/explained.md)** — plain
-English, ten minutes, no prior context assumed.
+[See it on a PR](#see-it-on-a-real-pull-request) ·
+[Security](#safe-to-run-next-to-production-credentials) ·
+[Pricing accuracy](#pricing-you-can-audit) ·
+[Documentation](#documentation) ·
+[Maturity](#project-maturity)
 
 </div>
-
-> [!NOTE]
-> **MVP — feature-complete, not yet battle-tested.** Everything on the
-> [roadmap](#roadmap) ships: the CLI, the GitHub Action, a pre-commit hook, a
-> published container image, and config scaffolding. What it has not had is
-> mileage across many real projects, which is the only thing that finds the last
-> class of bug. **If it does something wrong or confusing, that is worth a
-> [bug report](https://github.com/Drichards124/dbt-costgate/issues/new/choose)** —
-> including "the number looks wrong", which is the most useful report this tool
-> can get.
->
-> Every report shown here is **generated from the real renderers** by
-> `scripts/gen_samples.py`, and CI fails if any of them drifts from what the code
-> actually produces — the figures are illustrative, the output is not. See the
-> [usage guide](docs/usage.md) and [changelog](CHANGELOG.md).
 
 ---
 
-## The problem
+## What it does
 
-On dbt + BigQuery teams, SQL changes merge with **zero visibility into their cost
-impact**. A changed join, a dropped partition filter, or a widened incremental
-window can multiply a model's bytes scanned — and the team finds out days later
-on the bill, or when finance escalates.
+A dbt model's cost lives in its SQL, and nothing in code review shows you that
+number. A dropped partition filter, a widened incremental window, or one changed
+join can multiply the bytes a model scans — and the team finds out days later on
+the bill, or when finance escalates.
 
-BigQuery's dry-run API returns the *exact* bytes a query would scan — **for
-free, before running anything**. dbt-costgate packages that into a first-class PR
-gate:
+BigQuery will tell you the **exact** bytes a query would scan, for free, before
+anything runs. dbt-costgate turns that into a pull-request gate.
 
-<div align="center">
+- 💸 **Free to run.** Dry-run only — it never executes a query, never reads a row, and never appears on your bill.
+- 🎯 **Exact, not estimated.** The byte count comes from BigQuery's own query planner, not from a heuristic over your SQL.
+- ⚡ **Four lines to a first answer.** No config file, no baseline, no CI setup, no account to create.
+- 🔒 **Nothing to hand over.** No credential flags, no telemetry, and no compiled SQL in any report.
 
-![How dbt-costgate works: pull request → compile both versions → BigQuery dry-run → price the diff → gate](docs/assets/flow.svg)
+## See it on a real pull request
 
-</div>
-
-## What you get on every PR
-
-A sticky comment on the pull request, updated in place on every push. This is the
-comment itself — GitHub renders it from the same markdown dbt-costgate produces:
+A sticky comment, updated in place on every push. This is the comment itself —
+GitHub is rendering the same markdown dbt-costgate produces:
 
 <!-- BEGIN GENERATED: pr-comment -->
 <!-- Generated by scripts/gen_samples.py from the real renderers. Do not edit by hand. -->
@@ -88,8 +67,8 @@ comment itself — GitHub renders it from the same markdown dbt-costgate produce
 <sub>Pricing: US USD 6.25/TiB · built-in table (table 2026.07, verified 2026-07-25)<br/>Priced from the first byte scanned: BigQuery's 1 TiB/month on-demand free tier is per billing account, so it is disclosed here and never deducted.<br/>Estimates from BigQuery dry-run — nothing executed, no bytes billed, no SQL shown.</sub>
 <!-- END GENERATED: pr-comment -->
 
-<details open>
-<summary><b>💻 The same check, in your terminal (real output)</b></summary>
+<details>
+<summary><b>💻 The same check in your terminal (real output)</b></summary>
 <br/>
 
 ```bash
@@ -124,12 +103,6 @@ dbt-costgate — region: US · on-demand USD 6.25/TiB · built-in table
 ```
 <!-- END GENERATED: diff-terminal -->
 
-Or run it with no baseline at all for an instant local read of what your changed
-models scan — and fail the run there on an absolute `--max-usd-total` /
-`--max-tib-total` ceiling (no baseline required) — or get the full before/after
-locally in one command with `dbt-costgate check --against main` (dbt-costgate compiles
-`main` for you in a throwaway worktree). See the [usage guide](docs/usage.md).
-
 </details>
 
 ## Quick start
@@ -142,33 +115,70 @@ dbt compile
 dbt-costgate check
 ```
 
-That's the entire local setup — no baseline, no CI, no config file. Add a
-baseline and thresholds when you want it to *block* a PR; see the
-[usage guide](docs/usage.md).
+That is the entire local setup — no baseline, no CI, no config file. You get each
+changed model's scan cost immediately.
 
-When you do want a config file, `dbt-costgate init` writes one documenting every
-setting, all commented out — so it changes nothing until you uncomment
-something.
+**To make it block a pull request,** add a threshold. `dbt-costgate init` writes a
+config file documenting every setting with all of them commented out, so it
+changes nothing until you uncomment one:
 
+```yaml
+# .dbt-costgate.yml
+thresholds:
+  max_usd_total: 20.00     # fail if any model costs more than this per run
+```
+
+**Other ways to run it:** a [GitHub Action](docs/usage.md#github-action) with the
+sticky comment above, a [pre-commit hook](docs/usage.md#pre-commit-hook) that
+catches it before you push, or the published container image
+`ghcr.io/drichards124/dbt-costgate:v1.0.5` for
+[CI that isn't GitHub Actions](docs/usage.md#docker-and-ci-that-isnt-github-actions).
 Every [release](https://github.com/Drichards124/dbt-costgate/releases) also ships a
-wheel, an sdist, and `SHA256SUMS` if you'd rather pin to an artifact.
+wheel, an sdist and `SHA256SUMS` if you would rather pin to an artifact.
 
-## Documentation
+## Safe to run next to production credentials
 
-So you know where to look before you open anything:
+This tool runs in CI beside your warehouse credentials, so the design is
+deliberately boring. Each row below is an invariant, not a setting you have to
+get right:
 
-| Document | What's inside | Go here when |
-|---|---|---|
-| **[Explained](docs/explained.md)** | Plain-English guide: how it works, what it costs to run, which pricing setup you're in, **every config key**, the deliberate non-goals, and when a number can be wrong | You're new, or you want to know what a setting does |
-| **[Usage guide](docs/usage.md)** | The how-to: install, CI setup, baselines, thresholds, the GitHub Action, worked examples for on-demand / negotiated / slot pricing | You're setting it up or changing how it runs |
-| **[Architecture](docs/architecture.md)** | Why it's built this way, the invariants, the hard edges | You're contributing or reviewing a change |
-| **[Security](SECURITY.md)** | Threat model, and what counts as a vulnerability | You're reviewing it for use next to production credentials |
-| **[Changelog](CHANGELOG.md)** | What changed in each release, in operator terms | You're upgrading |
+| Threat | Design answer |
+|---|---|
+| Billable or data-reading queries | **Dry-run only.** The single warehouse interaction is `jobs.insert` with `dryRun=true` — free, executes nothing, reads no table data |
+| Credential theft or mishandling | **No credential surface.** Auth delegates entirely to [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); in CI the documented path is keyless [Workload Identity Federation](https://github.com/google-github-actions/auth). There are no credential flags to misuse |
+| Compromised CI runner | **Least privilege.** BigQuery Job User + metadata read — no data access, no writes; the docs ship the exact IAM setup |
+| Malicious fork pull requests | **Fork-safe by default.** Documented workflows use the `pull_request` trigger; fork PRs degrade to "no report", never to exposed secrets |
+| Secrets templated into SQL | **No compiled SQL in reports** — model names, bytes and dollars only. This covers BigQuery's own error text, which quotes the query it was given |
+| Phone-home | **No telemetry.** The only network call is to the BigQuery API |
 
-Every example report in these docs is generated from the real renderers, and CI
-fails if one drifts — so what you read is what the tool actually prints.
+Full threat model in [SECURITY.md](SECURITY.md) · design notes in
+[docs/architecture.md](docs/architecture.md).
+
+## Pricing you can audit
+
+BigQuery on-demand rates differ by region — a gate that prices every byte at the
+US rate is silently wrong for half the world. So every figure shows its work:
+
+- 🌍 **Versioned per-region pricing table** with a `last_verified` date, auto-selected from your job's detected region.
+- 🧾 **Every report discloses its math** — region, rate, and where that rate came from. Never a silent assumption:
+
+  ```text
+  region: US (multi-region) · on-demand USD 6.25/TiB · source: built-in table 2026.07
+  ```
+
+- ⚙️ **Overridable** — `pricing.region` to force a region, `pricing.usd_per_tib` for a negotiated or Editions rate, `pricing.currency` to label amounts in your own currency (an ISO 4217 code — dbt-costgate labels, it never converts).
+- ⚠️ **Honest limits, stated up front** — under capacity/Editions pricing, bytes scanned is a proxy signal rather than your invoice; set a rate of `0` and reports drop money entirely and measure bytes instead. Every priced report discloses the 1 TiB/month on-demand free tier it does **not** deduct, because that allowance belongs to the whole billing account and a dry-run cannot see it.
+
+Not sure which applies to you? [Which pricing setup are you?](docs/explained.md#which-pricing-setup-are-you)
+· [When the number can be wrong](docs/explained.md#when-the-number-can-be-wrong)
 
 ## How it works
+
+<div align="center">
+
+![How dbt-costgate works: pull request → compile both versions → BigQuery dry-run → price the diff → gate](docs/assets/flow.svg)
+
+</div>
 
 | Step | What happens | Cost to you |
 |------|--------------|-------------|
@@ -178,9 +188,33 @@ fails if one drifts — so what you read is what the tool actually prints.
 | 4 · **Price the diff** | Region-aware on-demand rates; optionally × run frequency for $/month | free |
 | 5 · **Gate** | Markdown PR comment, machine-readable JSON, policy-driven exit code (fail on a $ and/or % increase, or an absolute $/run or TiB/run ceiling) | free |
 
+It also catches the changes that do not touch a model's own `.sql` file — a
+macro edit or a `dbt_project.yml` config change that alters the compiled SQL
+underneath it.
+
+## Documentation
+
+Written for people who have to review this before it runs anywhere near
+production. So you know where to look before opening anything:
+
+| Document | What's inside | Go here when |
+|---|---|---|
+| **[Explained](docs/explained.md)** | Plain-English guide: how it works, what it costs to run, which pricing setup you're in, **every config key**, the deliberate non-goals, and when a number can be wrong | You're new, or you want to know what a setting does |
+| **[Usage guide](docs/usage.md)** | The how-to: install, CI setup, baselines, thresholds, the GitHub Action, worked examples for on-demand / negotiated / slot pricing | You're setting it up or changing how it runs |
+| **[Architecture](docs/architecture.md)** | Why it's built this way, the invariants, the hard edges | You're contributing or reviewing a change |
+| **[Security](SECURITY.md)** | Threat model, and what counts as a vulnerability | You're reviewing it for use next to production credentials |
+| **[Changelog](CHANGELOG.md)** | What changed in each release, in operator terms | You're upgrading |
+
+In the tool itself, `dbt-costgate config` lists every setting one line each, and
+`dbt-costgate config <key>` explains one in full and prints the YAML that sets it.
+
+Every example report in this README and across the docs is **generated from the
+real renderers** by `scripts/gen_samples.py`, and CI fails if one drifts from
+what the code actually prints — the figures are illustrative, the output is not.
+
 ## Where it fits
 
-dbt-costgate is the **preventive** half of BigQuery cost control — it deliberately
+dbt-costgate is the **preventive** half of BigQuery cost control. It deliberately
 does not compete with the excellent retrospective tools:
 
 | The question you're asking | Reach for |
@@ -189,41 +223,22 @@ does not compete with the excellent retrospective tools:
 | "What does the dbt platform estimate my models cost?" | [dbt Cost Insights](https://docs.getdbt.com/docs/explore/cost-insights) |
 | "What is **this PR about to do** to our bill?" | **dbt-costgate** |
 
-## Accurate, transparent pricing
+## Project maturity
 
-BigQuery on-demand rates differ by region — a gate that prices every byte at
-the US rate is silently wrong for half the world. dbt-costgate treats pricing
-accuracy as a feature:
+**Feature-complete, and honest about mileage.** Everything on the
+[roadmap](#roadmap) ships today. What this has not yet had is a year across many
+different warehouses, which is the only thing that finds the last class of bug.
 
-- 🌍 **Versioned per-region pricing table** with a `last_verified` date, auto-selected from your job's detected region.
-- 🧾 **Every report discloses its math** — region, rate, and rate source. Never a silent assumption:
+Every release is gated on a production-like run that installs the *built wheel*
+on the full OS and Python matrix and exercises it there — not just the source
+tree — before it can be promoted and tagged.
 
-  ```text
-  region: US (multi-region) · on-demand USD 6.25/TiB · source: built-in table 2026.07
-  ```
-
-- ⚙️ **Overridable** — `pricing.region` to force a region, `pricing.usd_per_tib` for negotiated or editions rates, `pricing.currency` to label amounts in your own currency (an ISO 4217 code — dbt-costgate labels, it never converts).
-- ⚠️ **Honest limits, stated up front** — under capacity/editions pricing, bytes scanned is a proxy signal, not your invoice; set a rate of `0` and reports drop money entirely and measure bytes instead. Every priced report's footer discloses the 1 TiB/month on-demand free tier it does **not** deduct — the allowance is per billing account, which a dry-run cannot see, so figures are priced from the first byte.
-
-## Security model
-
-This tool runs in CI next to warehouse credentials, so the design is
-deliberately boring:
-
-| Threat | Design answer |
-|---|---|
-| Billable or data-reading queries | **Dry-run only.** The single warehouse interaction is `jobs.insert` with `dryRun=true` — free, executes nothing |
-| Credential theft / mishandling | **No credential surface.** Auth delegates entirely to [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); in CI the documented path is keyless [Workload Identity Federation](https://github.com/google-github-actions/auth). There are no credential flags to misuse |
-| Compromised CI runner | **Least privilege.** BigQuery Job User + metadata read — no data access, no writes; docs ship the exact IAM setup |
-| Malicious fork PRs | **Fork-safe by default.** Documented workflows use the `pull_request` trigger; fork PRs degrade to "no report", never to exposed secrets |
-| Secrets templated into SQL | **No compiled SQL in reports** — model names, bytes, and dollars only; snippets are strictly opt-in |
-| Phone-home | **No telemetry.** The only network call is to the BigQuery API |
-
-Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architecture.md](docs/architecture.md).
+**If a number looks wrong, that is the single most useful bug report this project
+can get.** [Open one here](https://github.com/Drichards124/dbt-costgate/issues/new/choose).
 
 ## Roadmap
 
-**The MVP roadmap is complete** — every item below ships as of
+Every item below ships as of
 [v1.0.5](https://github.com/Drichards124/dbt-costgate/releases/latest).
 
 - [x] **`dbt-costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
@@ -232,16 +247,13 @@ Details in [SECURITY.md](SECURITY.md) · deeper design notes in [docs/architectu
 - [x] **Absolute cost ceilings** — gate on total `$/run` or `TiB/run`, not just the increase (works without a baseline, so it gates local mode too)
 - [x] **Config- and macro-only change detection** — catch a change that reaches a model without touching its `.sql` file
 - [x] **`pre-commit` hook** — catch it on your own machine, at pre-push
-- [x] **Docker image** — for CI that isn't GitHub Actions; build it yourself, or
-- [x] **pull the published image** — `ghcr.io/drichards124/dbt-costgate:v1.0.5`, pushed on every release
+- [x] **Docker image** — published on every release, for CI that isn't GitHub Actions
 
-**What's next is not another feature.** The list above was written before anyone
+**What comes next is not another feature.** That list was written before anyone
 had run this against a real warehouse for a month. The useful next step is use —
-finding where the numbers, the defaults or the docs are wrong — and the next
-features should be the ones that use actually asks for, rather than the ones that
-looked obvious from here. Two places that already know what they don't do:
-[when the number can be wrong](docs/explained.md#when-the-number-can-be-wrong)
-and the non-goals below.
+finding where the numbers, the defaults or the docs are wrong — and the features
+after it should be the ones people actually ask for rather than the ones that
+looked obvious from here.
 
 ## Non-goals
 
