@@ -12,11 +12,21 @@ requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Dashan Richards" }]
 keywords = ["bigquery", "dbt", "finops", "cost", "dry-run", "ci", "analytics-engineering"]
+# PyPI renders these on the listing page, above the README — for a lot of people
+# they are the first thing read about this project. `tests/test_packaging_metadata.py`
+# checks the two that go stale in silence: the Development Status, which sat at
+# Pre-Alpha through every 1.x release, and the Python versions, which have to keep
+# matching the range CI actually tests.
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
     "Environment :: Console",
 ]

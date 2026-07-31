@@ -14,7 +14,7 @@ Dry-run what changed, price the diff, and catch the $500-a-day model<br/>*before
 [![Python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![CI](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml/badge.svg)](https://github.com/Drichards124/dbt-costgate/actions/workflows/ci.yml)
-[![Status](https://img.shields.io/badge/status-MVP-brightgreen)](#project-maturity)
+[![Status](https://img.shields.io/badge/status-beta-blue)](#project-maturity)
 
 [Quick start](#quick-start) ·
 [See it on a PR](#see-it-on-a-real-pull-request) ·
