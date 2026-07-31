@@ -5,9 +5,26 @@
 #
 # The listing is published per release, by hand, from the release editor. It does
 # not follow new releases: it stays at whichever release last had the box ticked,
-# so it can advertise old code indefinitely with nothing reporting it. No REST or
-# GraphQL field exposes this — checked, not assumed — so reading the page is the
-# only way to know.
+# so it can advertise old code indefinitely with nothing reporting it.
+#
+# Two things stop that being automated away, and the second is the one that
+# settles it.
+#
+# No REST or GraphQL field exposes the flag — checked, not assumed. The release
+# object carries draft, prerelease, assets and notes, and nothing about the
+# Marketplace; `gh release edit` has no flag for it either.
+#
+# And the checkbox is not really a checkbox. It is already ticked when the editor
+# opens, because the Action is listed in general — so publishing a version means
+# SUBMITTING the form rather than changing anything on it. GitHub guards that
+# submit with sudo-mode re-authentication: a 2FA prompt, every time. A token
+# cannot satisfy that, which means a REST field appearing tomorrow would not help
+# either. Confirmed by walking it through the browser on v1.1.0 and being stopped
+# at the prompt.
+#
+# Detecting a stale listing is therefore the only part of this a machine can do,
+# and reading the page is the only way to detect it. That is the whole reason
+# this script exists in the form it does: it reports, and a human ticks.
 #
 # READ `releases[]`, NEVER `latestRelease`. The page embeds both and they mean
 # different things:
