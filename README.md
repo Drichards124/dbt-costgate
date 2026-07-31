@@ -131,7 +131,7 @@ thresholds:
 **Other ways to run it:** a [GitHub Action](docs/usage.md#github-action) with the
 sticky comment above, a [pre-commit hook](docs/usage.md#pre-commit-hook) that
 catches it before you push, or the published container image
-`ghcr.io/drichards124/dbt-costgate:v1.0.5` for
+`ghcr.io/drichards124/dbt-costgate:v1.1.0` for
 [CI that isn't GitHub Actions](docs/usage.md#docker-and-ci-that-isnt-github-actions).
 Every [release](https://github.com/Drichards124/dbt-costgate/releases) also ships a
 wheel, an sdist and `SHA256SUMS` if you would rather pin to an artifact.
@@ -239,7 +239,7 @@ can get.** [Open one here](https://github.com/Drichards124/dbt-costgate/issues/n
 ## Roadmap
 
 Every item below ships as of
-[v1.0.5](https://github.com/Drichards124/dbt-costgate/releases/latest).
+[v1.1.0](https://github.com/Drichards124/dbt-costgate/releases/latest).
 
 - [x] **`dbt-costgate check`** — local (zero-setup) + CI diff, region-aware pricing, threshold gating
 - [x] **One-command local diff** — `dbt-costgate check --against main` (isolated git worktree)
