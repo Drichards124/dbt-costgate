@@ -44,7 +44,7 @@ compiled artifacts ──┐
                       └─→ region-aware pricing ─→ report (md/term/json) ─→ gate (exit code)
 ```
 
-## Data flow (MVP)
+## Data flow
 
 ```
 baseline manifest ──┐
