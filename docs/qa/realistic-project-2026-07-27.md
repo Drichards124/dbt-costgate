@@ -2,6 +2,13 @@
 
 # A realistic dbt project — 2026-07-27
 
+> **Archived QA record — not current documentation.** Kept exactly as written
+> on the date in the title. It records what was true then, is cited from the
+> changelog as evidence for that, and is deliberately not updated as the tool
+> changes. For how the tool behaves now see [the usage guide](../usage.md) and
+> [the changelog](../../CHANGELOG.md); for what these files are, see
+> [README.md](README.md).
+
 The [live BigQuery run](live-bigquery-2026-07-27.md) proved the network edge but
 ran on four toy models. That leaves the tool's subtlest logic untested: what an
 *incremental* model costs. [models.py](../../src/dbt_costgate/models.py) carries

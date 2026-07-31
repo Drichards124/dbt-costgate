@@ -2,6 +2,13 @@
 
 # Multi-region pricing, driven end to end — 2026-07-28
 
+> **Archived QA record — not current documentation.** Kept exactly as written
+> on the date in the title. It records what was true then, is cited from the
+> changelog as evidence for that, and is deliberately not updated as the tool
+> changes. For how the tool behaves now see [the usage guide](../usage.md) and
+> [the changelog](../../CHANGELOG.md); for what these files are, see
+> [README.md](README.md).
+
 [The live BigQuery run](live-bigquery-2026-07-27.md) closed with a caveat it was
 careful to state plainly:
 
