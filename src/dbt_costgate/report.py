@@ -16,6 +16,7 @@ from dbt_costgate.layout import (
     Palette,
     display_width,
     pad,
+    prose_width,
     render_table,
     wrap,
 )
@@ -411,14 +412,18 @@ def _terminal_spec(report: Report) -> list[tuple[Column, object]]:
 def _keyed_block(pairs: list[tuple[str, str]], width: int, indent: int = 4) -> list[str]:
     """`key   text` lines with the text aligned into a second column and wrapped
     under itself, so a long note stays inside its own column instead of running
-    back under the key."""
+    back under the key.
+
+    The key column is laid out at the full width; the note beside it is prose and
+    is capped, because a note is read along the line and gains nothing from a
+    150-character one."""
     if not pairs:
         return []
     key_width = max(display_width(k) for k, _ in pairs)
     hang = indent + key_width + 2
     lines: list[str] = []
     for key, text in pairs:
-        body = wrap(text, width, indent=hang, hanging=hang)
+        body = wrap(text, prose_width(width), indent=hang, hanging=hang)
         lines.append(" " * indent + pad(key, key_width) + "  " + body[0].lstrip())
         lines.extend(body[1:])
     return lines
@@ -480,6 +485,12 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
     # Wrapped like everything else: at 60 columns the region, the rate and the
     # rate's provenance do not fit on one line, and a header that overflows is
     # the same defect this rewrite exists to remove.
+    #
+    # Full width, not `prose_width`: this is a run of figures separated by `·`,
+    # not a sentence, and it is already near a hundred characters with three
+    # regions in it. Capping would break it across two lines on a wide terminal
+    # that was showing it on one — costing readability rather than buying it,
+    # which is the opposite of what the cap is for.
     head = wrap(f"dbt-costgate — region: {regions}{tail}", width, hanging=2)
     lines.append(p.bold("dbt-costgate") + p.dim(head[0][len("dbt-costgate") :]))
     lines.extend(p.dim(line) for line in head[1:])
@@ -488,7 +499,7 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
     if not report.deltas:
         lines.append(" " * _INDENT + "No changed models to estimate.")
         lines.append("")
-        lines.extend(p.dim(line) for line in wrap(_DRYRUN_NOTE, width, indent=_INDENT))
+        lines.extend(p.dim(line) for line in wrap(_DRYRUN_NOTE, prose_width(width), indent=_INDENT))
         return "\n".join(lines)
 
     spec = _terminal_spec(report)
@@ -508,7 +519,7 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
                 p.dim(line)
                 for line in wrap(
                     f"{', '.join(dropped)} hidden — widen the terminal, or use --format json",
-                    width,
+                    prose_width(width),
                     indent=_INDENT,
                 )
             )
@@ -523,7 +534,8 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
         # Dim, and under the net figure rather than beside it: it is context for
         # that number, not another measurement competing with it.
         lines.extend(
-            p.dim(line) for line in wrap(allowance, width, indent=_INDENT, hanging=_INDENT + 2)
+            p.dim(line)
+            for line in wrap(allowance, prose_width(width), indent=_INDENT, hanging=_INDENT + 2)
         )
 
     lines.append("")
@@ -535,7 +547,9 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
         paint = p.red if v.status == Status.FAIL else p.yellow
         lines.append(paint(p.bold(" " * _INDENT + f"GATE: {label}")))
         for b in v.breaches:
-            lines.extend(wrap(f"- {b}", width, indent=_INDENT + 2, hanging=_INDENT + 4))
+            lines.extend(
+                wrap(f"- {b}", prose_width(width), indent=_INDENT + 2, hanging=_INDENT + 4)
+            )
 
     model_notes = _model_notes(report)
     footnotes = _basis_footnotes(report)
@@ -548,7 +562,9 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
         # a key column beside it would only print the tag twice. Verbatim, so the
         # sentence a reader sees here is the one they see in the pull request.
         for note in footnotes:
-            lines.extend(wrap(f"⚠ {note}", width, indent=_INDENT + 2, hanging=_INDENT + 4))
+            lines.extend(
+                wrap(f"⚠ {note}", prose_width(width), indent=_INDENT + 2, hanging=_INDENT + 4)
+            )
 
     lines.append("")
     # Notices sit with the disclosure, not with the gate: both describe how this
@@ -564,7 +580,10 @@ def render_terminal(report: Report, *, width: int | None = None, color: bool = F
     # and a `PRICING` label above it just said the word twice. Dimmed and set
     # apart by the blank line, which is enough to read as a footer.
     for note in _footer_notes(d0):
-        lines.extend(p.dim(line) for line in wrap(note, width, indent=_INDENT, hanging=_INDENT + 2))
+        lines.extend(
+            p.dim(line)
+            for line in wrap(note, prose_width(width), indent=_INDENT, hanging=_INDENT + 2)
+        )
     return "\n".join(lines)
 
 

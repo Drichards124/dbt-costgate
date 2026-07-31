@@ -25,7 +25,9 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # What a report renders to when nothing better is known: a file, a pipe, a CI log.
@@ -36,6 +38,13 @@ MIN_TABLE_WIDTH = 60
 # A model name shrinks this far before anything else gives way. Shorter than this
 # and the names stop being recognisable, which defeats the point of the column.
 MIN_NAME_WIDTH = 18
+# Past roughly this many characters the eye starts losing its place tracking back
+# to the beginning of the next line, so a paragraph stops getting more readable as
+# the window gets wider. Deliberately its own constant rather than a second use of
+# DEFAULT_WIDTH, which happens to hold the same number: that one means "what to
+# render at when there is nothing to measure", and changing it should not silently
+# change how prose is set.
+PROSE_WIDTH = 100
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
@@ -96,6 +105,66 @@ def wrap(text: str, width: int, *, indent: int = 0, hanging: int | None = None) 
     if current:
         lines.append(" " * left + " ".join(current))
     return lines
+
+
+# How much room a description needs beside its label before it is worth putting
+# it there at all. Under this, the label keeps the line and the description goes
+# underneath — the same "give way rather than truncate" rule `render_table` uses.
+MIN_DESCRIPTION_WIDTH = 20
+# Where a description sits when it has been pushed under its label.
+_FALLBACK_INDENT = 4
+
+
+def prose_width(width: int) -> int:
+    """The width to set running prose at, in a terminal `width` cells across.
+
+    A cap and never a floor — a narrow window still wins, because fitting the
+    terminal is the harder constraint and this is only a preference.
+
+    Tables are not capped, and the difference is not an inconsistency: a table is
+    read down a column, so extra width buys it another figure or a name that no
+    longer needs truncating. A paragraph is read along the line, and extra width
+    past about a hundred characters buys it nothing while making the return sweep
+    to the next line steadily harder. Status lines full of figures count as the
+    former, not the latter.
+    """
+    return min(width, PROSE_WIDTH)
+
+
+def hanging_row(
+    prefix: str,
+    text: str,
+    width: int,
+    *,
+    style: Callable[[str], str] | None = None,
+) -> list[str]:
+    """`prefix`, then `text` wrapping under itself instead of past `width`.
+
+    The shape every label-and-description list wants: a key and what it does, a
+    command and what it is for. `prefix` is passed in already padded and already
+    styled, so a caller can put a coloured column inside it.
+
+    The wrap column is measured from `prefix` rather than taken as an argument.
+    Passing it separately meant two numbers that had to agree, and when a narrow
+    terminal clamped one of them the continuation lines indented to a column the
+    first line did not start at — every row one cell too long, which is the
+    defect this whole function exists to prevent.
+
+    `style` paints the description and nothing else — never the padding, so this
+    keeps the module's rule that colour goes on after alignment, not before.
+    """
+    paint = style or (lambda part: part)
+    column = display_width(prefix)
+    if width - column < MIN_DESCRIPTION_WIDTH:
+        body = wrap(text, width, indent=_FALLBACK_INDENT, hanging=_FALLBACK_INDENT)
+        return [prefix.rstrip(), *(_FALLBACK_INDENT * " " + paint(ln.lstrip()) for ln in body)]
+    body = wrap(text, width, indent=column, hanging=column)
+    if not body:
+        return [prefix.rstrip()]
+    return [
+        (prefix + paint(body[0].lstrip())).rstrip(),
+        *(" " * column + paint(line.lstrip()) for line in body[1:]),
+    ]
 
 
 @dataclass(frozen=True)
@@ -200,16 +269,75 @@ def _table_width(
 
 
 def terminal_width(stream=None) -> int:
-    """The width to render at.
+    """The width to render a **report** at.
 
     A stream that is not a terminal gets `DEFAULT_WIDTH`: a report redirected to a
     file, piped to `grep`, or captured by CI must not depend on the size of the
     window that happened to produce it. `shutil.get_terminal_size` honours
     `COLUMNS`, which is how a test — or a user — pins it.
+
+    Reference and help text wants the opposite and uses `help_width`; the two are
+    separate because the reasons are, not because one of them is a worse version
+    of the other.
     """
     if stream is not None and not _isatty(stream):
         return DEFAULT_WIDTH
     return max(MIN_TABLE_WIDTH, shutil.get_terminal_size((DEFAULT_WIDTH, 24)).columns)
+
+
+def help_width(stream=None) -> int:
+    """The width to render reference and help text at.
+
+    Unlike `terminal_width`, a stream that is not a terminal does not end the
+    search. `dbt-costgate config | less` is still being read in the window it was
+    launched from, and answering "100 columns" there is how a reference comes to
+    wrap raggedly in an 80-column terminal. A report has a real reason to ignore
+    the window — it may be committed or read back out of a CI log — and a list of
+    settings does not.
+
+    `shutil.get_terminal_size` is not enough on its own, which is the whole
+    reason this function exists: it asks `sys.__stdout__` and nothing else, so in
+    a pipeline it returns its fallback while stderr is sitting on the very
+    terminal it was looking for. Measured, with stdout piped from an 80-column
+    window: `shutil` says 100, stderr and stdin both say 80.
+
+    So COLUMNS is honoured first — that is how a test or a user pins it, and it
+    is the only signal that survives with no terminal anywhere — and then each
+    standard stream is asked in turn. `DEFAULT_WIDTH` remains the answer when
+    nothing is a terminal at all, which is the CI case.
+    """
+    from_env = _columns_from_env()
+    if from_env is not None:
+        return max(MIN_TABLE_WIDTH, from_env)
+    for candidate in (stream, sys.stdout, sys.stderr, sys.stdin):
+        columns = _tty_columns(candidate)
+        if columns is not None:
+            return max(MIN_TABLE_WIDTH, columns)
+    return DEFAULT_WIDTH
+
+
+def _columns_from_env() -> int | None:
+    """COLUMNS, when it holds a usable number. Nothing else in the environment is
+    consulted; a shell that does not export it simply falls through to the ioctl,
+    which is the more reliable signal anyway."""
+    try:
+        columns = int(os.environ.get("COLUMNS", ""))
+    except ValueError:
+        return None
+    return columns if columns > 0 else None
+
+
+def _tty_columns(stream) -> int | None:
+    """The width of the terminal behind `stream`, or None if there is not one.
+
+    `io.UnsupportedOperation` — what a captured or in-memory stream raises for
+    `fileno()` — subclasses both OSError and ValueError, so the streams pytest
+    substitutes land here as "not a terminal" rather than as a crash.
+    """
+    try:
+        return os.get_terminal_size(stream.fileno()).columns
+    except (AttributeError, ValueError, OSError):
+        return None
 
 
 def should_color(mode: str, stream=None) -> bool:

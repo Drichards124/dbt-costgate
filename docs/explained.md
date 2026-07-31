@@ -301,10 +301,11 @@ table stops the run rather than printing a US dollar figure under your label.
 All of these live in `.dbt-costgate.yml` in your project, which travels with your
 repo — so it applies identically on your laptop and in CI.
 
-You can also print this table at any time with `dbt-costgate config`. To start
-the file itself, run `dbt-costgate init` — it writes a `.dbt-costgate.yml` with
-every setting in it and every setting commented out, so nothing changes until
-you uncomment something.
+You can also print this table at any time with `dbt-costgate config`, which lists
+every setting one line each; `dbt-costgate config <key>` explains one in full and
+shows the YAML that sets it. To start the file itself, run `dbt-costgate init` —
+it writes a `.dbt-costgate.yml` with every setting in it and every setting
+commented out, so nothing changes until you uncomment something.
 
 > This table is generated from the same registry the code reads, so it cannot
 > describe a key that does not exist or omit one that does.
