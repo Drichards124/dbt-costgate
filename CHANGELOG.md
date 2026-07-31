@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 From 1.0 on, a breaking change means a new major version; releases up to and
 including 0.11.0 were pre-1.0, where minor versions could and did break things.
 
-## [Unreleased]
+## [1.1.0] - 2026-07-31
+
+### Added
+
+- **`dbt-costgate config <key>` explains one setting and shows the YAML that sets
+  it**, nested under the right section header so it can be pasted as-is. A
+  section name (`dbt-costgate config pricing`) prints everything under it, and
+  the leaf on its own (`dbt-costgate config max_pct_increase`) works as well as
+  the dotted key, because the leaf is what the list displays. An unrecognised
+  name exits 2 and suggests the nearest real one.
+- **`dbt-costgate config --verbose`** prints every setting's full explanation —
+  what the command used to do by default.
+- **`dbt-costgate config` takes `--color auto|always|never`**, matching `check`.
+- **`dbt-costgate` with no arguments now shows how to get started** instead of a
+  list of flags: the two commands that make up the local loop, the two more that
+  turn it into a pull-request gate, and what to run when it cannot reach
+  BigQuery.
+- **`dbt-costgate config --format json` gained a `summary` field** — the short
+  label the list shows. Every existing field is unchanged.
 
 ### Fixed
 
@@ -31,23 +49,8 @@ including 0.11.0 were pre-1.0, where minor versions could and did break things.
   ```
 
   The full explanations moved behind two new forms rather than going away.
-- **`dbt-costgate config <key>` explains one setting and shows the YAML that sets
-  it**, nested under the right section header so it can be pasted as-is. A
-  section name (`dbt-costgate config pricing`) prints everything under it, and
-  the leaf on its own (`dbt-costgate config max_pct_increase`) works as well as
-  the dotted key, because the leaf is what the list displays. An unrecognised
-  name exits 2 and suggests the nearest real one.
-- **`dbt-costgate config --verbose`** prints every setting's full explanation —
-  what the command used to do by default.
-- **`dbt-costgate config` takes `--color auto|always|never`**, matching `check`.
-- **`dbt-costgate` with no arguments now shows how to get started** instead of a
-  list of flags: the two commands that make up the local loop, the two more that
-  turn it into a pull-request gate, and what to run when it cannot reach
-  BigQuery.
 - **`dbt-costgate init` says which setting to uncomment first** and no longer
   claims every key's note states its default, which was not true of all of them.
-- **`dbt-costgate config --format json` gained a `summary` field** — the short
-  label the list shows. Existing fields are unchanged.
 - **`dbt-costgate config` and the no-argument screen now follow your terminal
   width even when their output is piped or redirected**, so `dbt-costgate config
   | less` and `dbt-costgate config > settings.txt` come out at the width of the
