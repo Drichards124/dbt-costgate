@@ -1,8 +1,7 @@
 # Contributing to dbt-costgate
 
 Thanks for your interest in improving `dbt-costgate`. This document covers the
-Developer Certificate of Origin (which every commit must satisfy), the local
-development setup, and how a change reaches a release.
+ground rules, the local development setup, and how a change reaches a release.
 
 ## Ground rules
 
@@ -20,31 +19,12 @@ development setup, and how a change reaches a release.
   pricing table (`src/dbt_costgate/data/`) must cite Google's published pricing
   page and update the table's `last_verified` date.
 
-## Developer Certificate of Origin (DCO)
+## Licensing your contribution
 
-This project uses the [Developer Certificate of Origin](https://developercertificate.org/)
-instead of a CLA. It is a lightweight statement that you have the right to submit
-your contribution under the project's license.
-
-**Every commit must be signed off.** Add the trailer automatically with the `-s`
-flag:
-
-```bash
-git commit -s -m "pricing: add me-central2 on-demand rate"
-```
-
-That appends a line to your commit message:
-
-```
-Signed-off-by: Your Name <your.email@example.com>
-```
-
-The name and email must match the commit author. Pull requests with unsigned
-commits are blocked by the DCO check. To fix an existing branch:
-
-```bash
-git rebase --signoff main
-```
+There is no CLA and nothing to sign. Opening a pull request against this project
+licenses your contribution under Apache-2.0, per section 5 of the
+[LICENSE](LICENSE) — that is the default the license already sets, and this
+project does not add anything on top of it.
 
 ## Local development
 

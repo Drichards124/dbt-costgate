@@ -617,7 +617,7 @@ jobs:
       - run: dbt compile
       # - run: <download your baseline manifest.json to baseline/manifest.json>
 
-      - uses: Drichards124/dbt-costgate@v1.0.5
+      - uses: Drichards124/dbt-costgate@v1.1.0
         with:
           baseline: baseline/manifest.json
           fail-on: fail # optional; unset defers to .dbt-costgate.yml
@@ -647,7 +647,7 @@ turns it into someone else's review problem.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/Drichards124/dbt-costgate
-    rev: v1.0.5
+    rev: v1.1.0
     hooks:
       - id: dbt-costgate
 ```
@@ -690,8 +690,8 @@ The repository ships a `Dockerfile`, so teams on GitLab CI, Buildkite, Jenkins o
 anything else can run the same check without a Python environment of their own.
 
 ```bash
-docker pull ghcr.io/drichards124/dbt-costgate:v1.0.5
-docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v1.0.5 check
+docker pull ghcr.io/drichards124/dbt-costgate:v1.1.0
+docker run --rm -v "$PWD:/workspace" ghcr.io/drichards124/dbt-costgate:v1.1.0 check
 ```
 
 Every release publishes `ghcr.io/drichards124/dbt-costgate` at both `:vX.Y.Z` and
@@ -942,9 +942,15 @@ refuses to overwrite a config you already have. Here is what it writes:
 # uncomment one. Section headers are left live, so switching a setting on is a
 # one-line edit.
 #
-# The values shown are illustrations, not defaults. Each key's real default is
-# in the note above it, and `dbt-costgate config` prints the same reference
-# at any time.
+# Start here: uncomment one threshold. Thresholds are what turn the report into
+# a gate — with none set, `dbt-costgate check` prices your change and always
+# passes. `thresholds.max_usd_total` is the one to try first, because it caps a
+# model's total cost and so needs no baseline to compare against.
+#
+# The values shown are illustrations, not defaults. Every setting here is
+# optional and unset until you uncomment it; where a key does something specific
+# when left unset, its note says so. `dbt-costgate config` lists all of them one
+# line each, and `dbt-costgate config <key>` prints one in full.
 #
 # Commit this file. `dbt-costgate check` reads it identically on your machine
 # and in CI, so there is nothing separate to configure for a PR run.
@@ -1072,8 +1078,12 @@ machine and in a PR run; commit the file and there is nothing CI-specific to wir
 up. The one thing that doesn't travel automatically is a **CLI flag** — to set one
 in CI, use the matching Action input.
 
-For the full, always-current list of keys — type, default, and what each does —
-run `dbt-costgate config` (add `--format json` for a machine-readable version).
+For the always-current list of keys, run `dbt-costgate config` — one line per
+setting, grouped the way they nest in the file. Add a key for the full
+explanation and the YAML to paste (`dbt-costgate config pricing.currency`, or
+just `dbt-costgate config currency`), a section name for everything under it,
+`--verbose` for all of them at once, or `--format json` for a machine-readable
+version.
 
 **Rate precedence** (most specific first): CLI `--usd-per-tib` → config
 `pricing.regions[region]` → config `pricing.usd_per_tib` → built-in table →

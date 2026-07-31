@@ -16,7 +16,7 @@ from conftest import (
 )
 from dbt_costgate.bigquery import DryRunResult
 from dbt_costgate.cli import _resolve_baseline, _UsageError, main
-from dbt_costgate.config import BaselineTarget, Config
+from dbt_costgate.config import CONFIG_REFERENCE, BaselineTarget, Config
 from dbt_costgate.models import TIB, ErrorKind
 
 
@@ -308,12 +308,17 @@ def test_uncompiled_baseline_rejected(tmp_path: Path, capsys):
     assert "no compiled SQL" in capsys.readouterr().err
 
 
-def test_config_command_lists_keys(capsys):
+def test_config_command_lists_every_key(capsys):
+    """The default view is the scannable list: one line per setting, laid out the
+    way the file nests, so `regions` sits under `pricing:` rather than being
+    spelled out as `pricing.regions` on a line of its own."""
     code = main(["config"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "pricing.regions" in out
-    assert "run_frequency.models" in out
+    assert "pricing:" in out
+    assert "run_frequency:" in out
+    for field in CONFIG_REFERENCE:
+        assert field.summary in out, f"{field.key} is missing from the list"
 
 
 def test_config_command_json_has_native_defaults(capsys):
@@ -324,7 +329,8 @@ def test_config_command_json_has_native_defaults(capsys):
     assert by_key["fail_on"]["default"] == "fail"  # native string, not stringified
     assert by_key["exclude"]["default"] == []  # native list
     assert by_key["pricing.region"]["default"] is None  # native null
-    assert set(by_key["fail_on"]) == {"key", "type", "default", "help"}  # attr not leaked
+    # attr stays internal; summary is part of the published shape.
+    assert set(by_key["fail_on"]) == {"key", "type", "default", "summary", "help"}
 
 
 def test_json_output_to_file(tmp_path: Path):

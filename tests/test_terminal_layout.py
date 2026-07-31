@@ -15,6 +15,7 @@ report reproducible between a laptop and a CI log.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -385,6 +386,121 @@ def test_wrap_hangs_continuations_under_the_first_line():
     assert lines[0].startswith("  ") and not lines[0].startswith("   ")
     assert all(line.startswith("    ") for line in lines[1:])
     assert all(layout.display_width(line) <= 12 for line in lines)
+
+
+class _Fd:
+    """A stream whose fileno() is a terminal of `columns` wide, or none at all.
+
+    `os.get_terminal_size` is monkeypatched against the number this hands back,
+    so the fake never has to own a real pty.
+    """
+
+    def __init__(self, columns: int | None):
+        self.columns = columns
+
+    def fileno(self) -> int:
+        if self.columns is None:
+            raise OSError(25, "Inappropriate ioctl for device")
+        return self.columns
+
+
+@pytest.fixture
+def sized_terminals(monkeypatch):
+    """`os.get_terminal_size(fd)` answering with the fd itself as the width."""
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(layout.os, "get_terminal_size", lambda fd: os.terminal_size((fd, 24)))
+    return monkeypatch
+
+
+def test_help_width_follows_the_terminal_through_a_pipe(sized_terminals):
+    """The point of `help_width`. stdout is a pipe — as it is under `| less` —
+    and stderr is still on the 88-column window the user is looking at."""
+    sized_terminals.setattr(layout.sys, "stdout", _Fd(None))
+    sized_terminals.setattr(layout.sys, "stderr", _Fd(88))
+    sized_terminals.setattr(layout.sys, "stdin", _Fd(None))
+    assert layout.help_width(_Fd(None)) == 88
+
+
+def test_help_width_prefers_the_stream_it_was_given(sized_terminals):
+    sized_terminals.setattr(layout.sys, "stderr", _Fd(88))
+    assert layout.help_width(_Fd(70)) == 70
+
+
+def test_help_width_honours_columns_above_every_stream(monkeypatch):
+    """The one signal that survives with no terminal anywhere, and how a user
+    pins the width of output they are redirecting to a file."""
+    monkeypatch.setenv("COLUMNS", "64")
+    monkeypatch.setattr(layout.sys, "stderr", _Fd(120))
+    assert layout.help_width(_Fd(120)) == 64
+
+
+@pytest.mark.parametrize("value", ["", "wide", "0", "-10"])
+def test_help_width_ignores_a_columns_that_is_not_a_width(value, sized_terminals):
+    sized_terminals.setenv("COLUMNS", value)
+    sized_terminals.setattr(layout.sys, "stdout", _Fd(76))
+    assert layout.help_width(_Fd(None)) == 76
+
+
+def test_help_width_falls_back_when_nothing_is_a_terminal(sized_terminals):
+    """A CI log. Nothing to measure, so the fixed width is the honest answer."""
+    for name in ("stdout", "stderr", "stdin"):
+        sized_terminals.setattr(layout.sys, name, _Fd(None))
+    assert layout.help_width(_Fd(None)) == layout.DEFAULT_WIDTH
+
+
+def test_help_width_never_goes_below_the_minimum(sized_terminals):
+    sized_terminals.setattr(layout.sys, "stdout", _Fd(20))
+    assert layout.help_width(_Fd(20)) == layout.MIN_TABLE_WIDTH
+
+
+def test_a_report_still_ignores_the_window_when_it_is_not_a_terminal(sized_terminals):
+    """`help_width`'s opposite, and deliberately so: a report may be committed or
+    read back out of a CI log, so it must not depend on the window that made it.
+    This is the guard that stops the two being 'unified' into one."""
+    sized_terminals.setattr(layout.sys, "stderr", _Fd(88))
+    assert layout.terminal_width(_Fd(None)) == layout.DEFAULT_WIDTH
+
+
+@pytest.mark.parametrize(
+    ("width", "expected"),
+    [(60, 60), (100, 100), (140, layout.PROSE_WIDTH), (240, layout.PROSE_WIDTH)],
+)
+def test_prose_width_caps_but_never_widens(width: int, expected: int):
+    """A cap, not a target: a narrow window still wins, because fitting the
+    terminal is a hard constraint and the reading measure is a preference."""
+    assert layout.prose_width(width) == expected
+
+
+def test_a_wide_terminal_spends_its_width_on_the_table_not_on_sentences():
+    """The whole point of capping only prose, asserted in both directions at once.
+
+    The table is sized by its content rather than stretched to fill the window,
+    so this needs a name long enough to push it past the reading measure — with
+    short names it sits near 80 and would pass whether or not it was capped.
+    """
+    rep = _report([_delta("fct_orders_daily_by_region_and_channel_rollup", 2 * TIB, TIB)])
+    rep.notices = [Notice(id="dead-money-thresholds", message="a long advisory " * 12)]
+    out = report.render_terminal(rep, width=180)
+
+    _, rule, *_ = _table_rows(out)
+    assert layout.display_width(rule) > layout.PROSE_WIDTH, "the table was capped too"
+
+    notice = [ln for ln in out.splitlines() if "advisory" in ln]
+    assert notice, "the notice should be in the report"
+    for line in notice:
+        assert layout.display_width(line) <= layout.PROSE_WIDTH, line
+
+
+def test_the_pricing_header_is_not_capped():
+    """It is a run of figures separated by `·`, not a sentence, and it already
+    runs near a hundred characters with three regions in it. Capping would split
+    it across two lines on a terminal that was showing it on one."""
+    rep = _report([_delta("m", TIB, TIB)])
+    rep.disclosure.regions = {"EU": 6.25, "US": 6.25, "asia-northeast1": 7.5}
+    rep.disclosure.region_sources = dict.fromkeys(rep.disclosure.regions, "region-table")
+    head = report.render_terminal(rep, width=180).splitlines()[0]
+    assert head.startswith("dbt-costgate")
+    assert "asia-northeast1" in head, "the header wrapped when it had room not to"
 
 
 def test_a_column_with_no_heading_and_no_content_is_not_rendered():
