@@ -262,7 +262,7 @@ and the non-goals below.
 [Code of Conduct](CODE_OF_CONDUCT.md) ·
 [Apache-2.0](LICENSE) · [NOTICE](NOTICE)
 
-Built by [Dashan Richards](https://github.com/Drichards124) — DCO sign-off required, hard invariants apply:<br/>
+Built by [Dashan Richards](https://github.com/Drichards124) — hard invariants apply:<br/>
 **dry-run only · no credential handling · no telemetry**
 
 </div>
