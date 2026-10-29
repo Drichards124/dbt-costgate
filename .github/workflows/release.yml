@@ -121,7 +121,7 @@ jobs:
       # dependency in the repository that nothing watched. The comment is what
       # Dependabot reads to bump the pin.
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
       # Publishing to the Marketplace is a UI action that CI cannot perform, so the
       # best it can do is make forgetting loud at the moment it is actionable.
